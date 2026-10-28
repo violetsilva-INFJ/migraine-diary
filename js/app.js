@@ -4,7 +4,7 @@ import {
   SEVERITY, SYMPTOMS, DURATIONS, durationOf, TRIGGERS, EFFECTS, RELIEF, STRESS, MEALS, DEFAULT_MEDS, icon,
   vasOf, sevOfVas, vasWord, REGIONS, REGION_IDS, LAT_LABEL, laterality, regionSummary, QUALITIES,
   MOOD, MOOD_SHORT, FEELINGS_NEG, FEELINGS_POS, MOOD_FACTORS, stressOf,
-  UNCAT, FOOD_CATALOG, EXERCISE_CATALOG, INTENSITY, SCALES, SCALE_OPTIONS, scaleBand, scaleLevel,
+  UNCAT, FOOD_CATALOG, EXERCISE_CATALOG, INTENSITY, SCALES, SCALE_OPTIONS, scaleBand, scaleLevel, CAFFEINE_ITEMS,
 } from './util.js';
 import { headSVG, VIEWS, VIEW_REGIONS } from './headmap.js';
 import * as S from './stats.js';
@@ -114,7 +114,7 @@ function streakDays() {
   while (has(k)) { n++; k = shiftKey(k, -1); }
   return n;
 }
-const fmtOR = x => x >= 10 ? x.toFixed(0) : x >= 1 ? x.toFixed(1) : x.toFixed(2);
+const fmtOR = x => x >= 10 ? x.toFixed(0) : x >= 0.995 ? x.toFixed(1) : x.toFixed(2);
 const fmtPts = x => Math.abs(x) < 0.05 ? '0.0' : `${x > 0 ? '+' : '−'}${Math.abs(x).toFixed(1)}`;
 const mean = arr => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
 
@@ -150,7 +150,7 @@ function render() {
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
-const POP_ACTS = new Set(['c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-stress', 'c-ex', 'c-sleep-set', 'c-period', 'c-alc', 'sel-day', 'med-kind']);
+const POP_ACTS = new Set(['c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-ex', 'c-sleep-set', 'c-period', 'sel-day', 'med-kind']);
 let lastHit = null;
 const hitKey = el => `${el.dataset.act}|${el.dataset.v ?? el.dataset.id ?? el.dataset.i ?? el.dataset.k ?? el.dataset.m ?? ''}`;
 function popLast(root) {
@@ -204,8 +204,8 @@ function tileValue(k, date) {
       const parts = [];
       if (d.meals) parts.push(`${MEALS.filter(([m]) => d.meals[m]).length} 餐`);
       if (foods.length) parts.push(foods.length === 1 ? foods[0].item : `${foods.length} 样`);
-      else if (d.caffeine) parts.push(`咖啡 ${d.caffeine}`);
-      if (!parts.length && d.alcohol) parts.push('饮酒');
+      else if (S.caffeineOf(d)) parts.push(`咖啡因 ${S.caffeineOf(d)}`);
+      if (!parts.length && S.alcoholOf(d)) parts.push('饮酒');
       return [true, parts.join(' · ') || '已记录'];
     }
     case 'sleep': return d.sleep != null ? [true, `${d.sleep} 小时`] : [false, '未记录'];
@@ -489,8 +489,8 @@ function dayDetail(k) {
   for (const f of (d.foods || []).slice(0, 4)) pills.push(`<span class="pill">${esc(f.item)}</span>`);
   for (const w of (d.workouts || []).slice(0, 2)) pills.push(`<span class="pill">${esc(w.item)}</span>`);
   if (d.meals) pills.push(`<span class="pill">吃了 ${MEALS.filter(([m]) => d.meals[m]).length} 餐</span>`);
-  if (d.caffeine) pills.push(`<span class="pill">咖啡 ${d.caffeine} 杯</span>`);
-  if (d.alcohol) pills.push('<span class="pill">饮酒</span>');
+  if (S.caffeineOf(d)) pills.push(`<span class="pill">咖啡因 ${S.caffeineOf(d)} 杯</span>`);
+  if (S.alcoholOf(d) && !(d.foods || []).some(f => f.cat === '酒类')) pills.push('<span class="pill">饮酒</span>');
   if (d.exercise != null) pills.push(`<span class="pill">${d.exercise ? `运动 ${d.exercise} 分钟` : '没运动'}</span>`);
   if (doses.length) pills.push(`<span class="pill"><i class="dot" style="background:var(--med);width:6px;height:6px"></i>${doses.map(m => esc(m.name)).join('、')}</span>`);
   return `<div class="day-detail">
@@ -612,35 +612,47 @@ function factorsCard(A) {
   </section>`;
 }
 
-function logAnalysisCard(A) {
-  const kind = ui.logKind || 'food', O = S.logOptions(state, kind);
-  const opts = [...O.cats, ...O.items];
-  const sel = opts.find(o => o.key === ui.logSel?.[kind]);
-  const seg = `<div class="seg-ctl" style="margin-bottom:12px">${[['food', '饮食'], ['ex', '运动']].map(([k, l]) => `<button class="${kind === k ? 'on' : ''}" data-act="log-kind" data-v="${k}">${l}</button>`).join('')}</div>`;
-  let body;
-  if (!opts.length) {
-    body = `<p class="sub">在「${kind === 'food' ? '饮食' : '运动'}」打卡里按大类记下${kind === 'food' ? '吃了 / 喝了什么' : '做了什么运动'}，这里就能挑一类来看它和头痛的关系。</p>`;
-  } else {
-    const chip = o => `<button class="chip mini ${sel?.key === o.key ? 'on' : ''}" data-act="log-sel" data-v="${esc(o.key)}">${esc(o.label)}<span class="muted" style="font-weight:400">${o.days}天</span></button>`;
-    body = `<p class="sub" style="margin-bottom:10px">选一个大类或具体项目，看看它和头痛的关系：</p>
-      <div class="chips">${O.cats.map(chip).join('')}</div>
-      ${O.items.length ? `<div class="chips" style="margin-top:8px">${O.items.slice(0, 16).map(chip).join('')}</div>` : ''}`;
-    if (sel) {
-      const r = S.logEffect(state, A.rows, kind, sel.key);
-      const when = kind === 'food' ? '当天或前一天有' : '当天做了';
-      body += `<div class="log-result"><b>${esc(sel.label)}</b>
-        <p class="sub">${when}的日子：${r.nE} 天，其中 ${r.aE} 天头痛（${pct(r.rateE)}）<br>其他有记录的日子：${r.nU} 天，其中 ${r.aU} 天头痛（${pct(r.rateU)}）</p>
-        ${r.or != null && r.nE >= 3 ? forestRow({ ...r, F: { key: 'custom', label: '风险倍数' } }, 'noop', `×${fmtOR(r.or)}`, r.lo, r.hi, fx).replace('<button class="factor"', '<div class="factor" style="padding-top:8px"').replace(/<\/button>$/, '</div>')
-          : '<p class="note">相关的日子还太少，多记录几次才能判断。</p>'}</div>`;
-    }
-  }
+// 挑一个来分析：先给原始对比和“只看这一项”，记录够多时再给“同时考虑其他因素”的校正结果
+const PICK = {
+  food: { label: '饮食', when: '当天或前一天有', meta: '看当天和前一天', empty: '在「饮食」打卡里按大类记下吃了 / 喝了什么，这里就能挑一类来看它和头痛的关系。', hint: '选一个大类或具体项目，看看它和头痛的关系：' },
+  ex: { label: '运动', when: '当天做了', meta: '看当天', empty: '在「运动」打卡里按大类记下做了什么运动，这里就能挑一项来看它和头痛的关系。', hint: '选一个大类或具体项目，看看它和头痛的关系：' },
+  mood: { label: '心情', when: '前一天有', meta: '看前一天', empty: '在「心情」打卡里选感受和影响因素，这里就能挑一项来看它和第二天头痛的关系。', hint: '选一种感受（上排）或影响因素（下排），看看它和第二天头痛的关系：' },
+};
+function forestStatic(label, e) {
+  return `<div class="factor" style="padding-top:10px">
+    <div class="row1"><span class="name" style="font-size:14.5px">${label}</span><span class="badge ${evClass(e)}">${evText(e)}</span><span class="est">×${fmtOR(e.or)}</span></div>
+    <div class="row2" style="margin-right:24px"><div class="forest" aria-hidden="true"><div class="axis"></div><div class="ref"></div>
+      <div class="ci ${evClass(e)}" style="left:${fx(e.lo)}%;width:${Math.max(1, fx(e.hi) - fx(e.lo))}%"></div>
+      <div class="pt ${evClass(e)}" style="left:${fx(e.or)}%"></div></div></div></div>`;
+}
+function pickResult(A, kind, sel) {
+  const P = PICK[kind], r = S.pickEffect(state, A.rows, kind, sel.key), u = r.uni;
+  const enough = u.or != null && u.nE >= 3;
+  return `<div class="log-result"><b>${esc(sel.label)}</b>
+    <p class="sub">${P.when}的日子：${u.nE} 天，其中 ${u.aE} 天头痛（${pct(u.rateE)}）<br>其他有记录的日子：${u.nU} 天，其中 ${u.aU} 天头痛（${pct(u.rateU)}）</p>
+    ${enough ? forestStatic('只看这一项', u) : '<p class="note">相关的日子还太少，多记录几次才能判断。</p>'}
+    ${r.adj ? forestStatic('同时考虑其他因素', r.adj) + `<p class="note">校正时一起考虑了：${r.adj.with.length ? r.adj.with.join('、') : '暂无其他可用因素'}。${Math.abs(Math.log(r.adj.or / u.or)) > 0.4 ? '两行差别较大，说明“只看这一项”的结果里混进了别的因素，以校正后的为准。' : '两行接近，说明这个关系不太受其他因素影响。'}</p>`
+      : enough ? '<p class="note">记录再多一些（至少 21 天、4 次头痛）后，会给出同时考虑睡眠、经期等其他因素的结果。</p>' : ''}
+  </div>`;
+}
+function pickCard(A, kinds, title) {
+  const kind = kinds.includes(ui.logKind) ? ui.logKind : kinds[0], P = PICK[kind], O = S.logOptions(state, kind);
+  const opts = [...O.cats, ...O.items], sel = opts.find(o => o.key === ui.logSel?.[kind]);
+  const seg = kinds.length > 1 ? `<div class="seg-ctl" style="margin-bottom:12px">${kinds.map(k => `<button class="${kind === k ? 'on' : ''}" data-act="log-kind" data-v="${k}">${PICK[k].label}</button>`).join('')}</div>` : '';
+  const chip = o => `<button class="chip mini ${sel?.key === o.key ? 'on' : ''}" data-act="log-sel" data-kind="${kind}" data-v="${esc(o.key)}">${esc(o.label)}<span class="muted" style="font-weight:400">${o.days}天</span></button>`;
+  const body = !opts.length ? `<p class="sub">${P.empty}</p>`
+    : `<p class="sub" style="margin-bottom:10px">${P.hint}</p>
+      ${O.cats.length ? `<div class="chips">${O.cats.map(chip).join('')}</div>` : ''}
+      ${O.items.length ? `<div class="chips" style="margin-top:8px">${O.items.slice(0, 16).map(chip).join('')}</div>` : ''}
+      ${sel ? pickResult(A, kind, sel) : ''}`;
   const unc = O.uncat.length ? `<div class="callout" style="margin-top:12px">${icon('info', 18)}<span>有 ${O.uncat.reduce((t, u) => t + u.count, 0)} 条直接填写的记录还没分类，分好类才能参与分析。
     <button class="link-btn" data-act="categorize">去分类</button></span></div>` : '';
-  return `<section class="card"><div class="card-head"><h3>饮食与运动</h3><span class="meta">${kind === 'food' ? '看当天和前一天' : '看当天'}</span></div>${seg}${body}${unc}</section>`;
+  return `<section class="card"><div class="card-head"><h3>${title}</h3><span class="meta">${P.meta}</span></div>${seg}${body}${unc}</section>`;
 }
+const logAnalysisCard = A => pickCard(A, ['food', 'ex'], '饮食与运动');
 
 function mindCard(A) {
-  const M = S.moodStats(state, A.rows);
+  const M = S.moodStats(state, A.rows), SV = S.scaleVsHeadache(state);
   const bar = (label, v, n) => v == null ? '' : `<div class="hbar"><span class="lbl">${label}<small>${n} 天</small></span><div class="track"><div class="fill" style="width:${v / 7 * 100}%;background:${MOOD_COLORS[Math.round(v) - 1]}"></div></div><span class="val">${fmtNum(v)}</span></div>`;
   const scale = key => {
     const list = M[key], S0 = SCALES[key];
@@ -651,14 +663,20 @@ function mindCard(A) {
       <div class="s">${md(last.date)}${prev.length ? ' · 之前 ' + prev.slice(0, 3).map(x => `${x.score}（${md(x.date)}）`).join('、') : ''}</div></div>
       <b class="num" style="font-size:22px">${last.score}</b></div>`;
   };
+  const rhoText = ['gad7', 'phq9'].map(k => SV[k].rho != null ? `${SCALES[k].name} 分数和同期头痛天数的相关 ρ = ${SV[k].rho >= 0 ? '+' : '−'}${Math.abs(SV[k].rho).toFixed(2)}（${SV[k].n} 次）` : null).filter(Boolean);
+  const compare = SV.rows.length ? `<h4 style="margin:14px 0 4px;font-size:14.5px">分数和同期头痛对照</h4>
+    <table class="table"><thead><tr><th>日期</th><th>GAD-7</th><th>PHQ-9</th><th>前两周头痛</th></tr></thead><tbody>
+      ${SV.rows.slice(0, 6).map(r => `<tr><td>${md(r.date)}</td><td>${r.gad7 ?? '—'}</td><td>${r.phq9 ?? '—'}</td><td>${r.head} 天${r.rec < 7 ? '*' : ''}</td></tr>`).join('')}</tbody></table>
+    <p class="note">${rhoText.length ? rhoText.join('；') + '。次数少时只作参考。' : '做满 4 次量表（且那两周记录不少于 7 天）后，会计算分数和头痛天数的相关。'}${SV.rows.some(r => r.rec < 7) ? ' * 表示那两周记录少于 7 天。' : ''}</p>` : '';
   return `<section class="card">
     <div class="card-head"><h3>心情与头痛</h3><span class="meta">${M.n} 天有心情记录</span></div>
     ${M.n ? `${bar('头痛当天', M.avgOn, M.nOn)}${bar('其他日子', M.avgOff, M.nOff)}
-      <p class="note">1 = 非常不愉快，7 = 非常愉快。${M.feelingsOnAttack.length ? `头痛当天最常见的感受：${M.feelingsOnAttack.map(([f, c]) => `${f}（${c}）`).join('、')}。` : ''}心情低落和压力也会进入上面的模型一起分析。</p>`
+      <p class="note">1 = 非常不愉快，7 = 非常愉快。${M.feelingsOnAttack.length ? `头痛当天最常见的感受：${M.feelingsOnAttack.map(([f, c]) => `${f}（${c}）`).join('、')}。` : ''}头痛本身也会让当天心情变差，所以模型里用的是「前一天情绪低落」。</p>`
       : '<p class="sub">在「今天」页的「心情」打卡，记录满一段时间后，这里会比较头痛日和其他日子的心情。</p>'}
   </section>
+  ${pickCard(A, ['mood'], '哪些感受和影响因素与头痛有关')}
   <section class="card"><div class="card-head"><h3>焦虑与抑郁自评</h3><span class="meta">过去两周</span></div>
-    ${scale('gad7')}${scale('phq9')}
+    ${scale('gad7')}${scale('phq9')}${compare}
     <p class="note">偏头痛常和焦虑、抑郁同时出现，互相影响。量表只用于自我观察，分数 ≥10 建议和医生聊聊。</p></section>`;
 }
 
@@ -809,7 +827,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.4</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.5</div></div></div>
   </div>`;
 }
 
@@ -1029,12 +1047,11 @@ function editor(k, date) {
       return `<section class="card"><h4>三餐<small>点选已经吃过的</small></h4>
         <div class="chips">${MEALS.map(([m, l]) => `<button class="chip ${meals[m] ? 'on' : ''}" style="flex:1" data-act="c-meal" data-m="${m}" aria-pressed="${!!meals[m]}">${l}</button>`).join('')}</div>
         ${d.meals ? `<p class="note">${MEALS.some(([m]) => !meals[m]) ? '没选的会被当作「漏餐」，晚点吃了再回来补上就好' : '三餐都吃了'}</p>` : ''}</section>
-      <section class="card"><h4>咖啡 / 浓茶</h4><div class="stepper">
-        <button data-act="c-caf" data-d="-1" aria-label="减少一杯">−</button><div class="big">${d.caffeine ?? 0}<small>杯</small></div>
-        <button data-act="c-caf" data-d="1" aria-label="增加一杯">+</button></div></section>
-      ${logEditor('food', date)}
-      <section class="card"><div class="switch-row"><span>喝了酒</span>
-        <button class="switch ${d.alcohol ? 'on' : ''}" role="switch" aria-checked="${!!d.alcohol}" data-act="c-alc" aria-label="喝了酒"></button></div></section>`;
+      <section class="card"><h4>含咖啡因的饮品<small>合计杯数</small></h4><div class="stepper">
+        <button data-act="c-caf" data-d="-1" aria-label="减少一杯">−</button><div class="big">${S.caffeineOf(d) ?? 0}<small>杯</small></div>
+        <button data-act="c-caf" data-d="1" aria-label="增加一杯">+</button></div>
+        <p class="note" style="text-align:center">下面「饮品」里记的咖啡、奶茶、浓茶、能量饮料会自动算进来；喝得比记录的多时再加。</p></section>
+      ${logEditor('food', date)}`;
     }
     case 'sleep':
       return `<section class="card"><h4>前一晚睡了多久</h4><div class="stepper">
@@ -1216,8 +1233,8 @@ function methodBody() {
     <p><b>滞后效应。</b>很多诱因要几小时到一天才起作用，所以部分因素看的是前一天：前一晚的睡眠、压力比前一天下降（“放松后头痛”）、前一天饮酒。</p>
     <p><b>预测与验证。</b>用分块时间序列交叉验证（按时间切成 5 段，轮流留出一段来检验）计算 AUC。只有 AUC ≥ 0.6、模型确实比瞎猜好时，才显示今日风险。</p>
     <p><b>相关性、趋势、经期。</b>Spearman 等级相关看睡眠等指标与当天头痛强度的单调关系；泊松回归（以每月记录天数为偏移量）判断频率趋势；经期窗口按 ICHD-3：经期第 1 天的前 2 天到后 3 天。</p>
-    <p><b>饮食与运动。</b>记录按「大类 → 具体项目」保存，这样同一种东西不会因为写法不同被拆开。在分析页可以挑任一大类（如「饮品」）或项目（如「奶茶」），比较有它和没有它的日子的头痛发生率，并给出风险倍数。饮食看当天或前一天（很多食物诱因要隔一段时间才起作用），运动看当天。直接填写的条目归入「未分类」，分好类后才参与分析。</p>
-    <p><b>心情与量表。</b>心情按 7 级愉快程度记录（参考 iOS「健康」），「情绪低落」和由感受推算的「压力」会进入上面的模型。GAD-7（焦虑）和 PHQ-9（抑郁）反映的是过去两周的整体情况，只做描述和变化追踪，不当作每天的诱因。</p>
+    <p><b>饮食与运动。</b>记录按「大类 → 具体项目」保存，这样同一种东西不会因为写法不同被拆开。在分析页可以挑任一大类（如「饮品」）或项目（如「奶茶」），比较有它和没有它的日子的头痛发生率，给出“只看这一项”的风险倍数；记录够多时，再给出把它和睡眠、经期、压力等一起放进逻辑回归后的校正结果（和所选项重叠的因素会先去掉，比如选了「酒类」就不再放「饮酒」）。饮食看当天或前一天（很多食物诱因要隔一段时间才起作用），运动看当天。咖啡因杯数和是否饮酒直接从饮食记录里推算。直接填写的条目归入「未分类」，分好类后才参与分析。</p>
+    <p><b>心情与量表。</b>心情按 7 级愉快程度记录（参考 iOS「健康」），头痛本身会让当天心情变差，所以模型里用「前一天情绪低落」，挑感受或影响因素来分析时也看前一天；由感受推算的「压力」也会进入模型。GAD-7（焦虑）和 PHQ-9（抑郁）反映的是过去两周的整体情况，不当作每天的诱因，而是和量表日期前两周的头痛天数做对照，做满 4 次后计算 Spearman 相关。</p>
     <p><b>为什么没用结构方程模型（SEM）。</b>SEM 适合多人、大样本、带潜变量的研究，通常需要几百个以上的观测。一个人几个月的日记远远不够，硬套会得到不稳定甚至误导的结果。</p>
     <p><b>请注意。</b>相关不等于因果，结果只供自我观察和与医生沟通时参考。每天都打卡（即使没头痛），结果会更可靠。</p>
   </section>`;
@@ -1298,7 +1315,7 @@ function exportCSV() {
     const st = stressOf(d);
     const daily = [d.sleep, d.mood?.valence ?? '', (d.mood?.feelings || []).join('/'), (d.mood?.factors || []).join('/'), st ? STRESS[st] : '',
       d.meals ? MEALS.filter(([m]) => d.meals[m]).map(([, l]) => l).join('/') : '', logText(d.foods),
-      d.caffeine, d.alcohol == null ? '' : d.alcohol ? '是' : '否', d.exercise, d.exIntensity ? INTENSITY[d.exIntensity] : '', logText(d.workouts),
+      S.caffeineOf(d) ?? '', S.alcoholOf(d) == null ? '' : S.alcoholOf(d) ? '是' : '否', d.exercise, d.exIntensity ? INTENSITY[d.exIntensity] : '', logText(d.workouts),
       d.period ? '是' : '', d.pain === 0 ? '是' : '', d.gad7?.score ?? '', d.phq9?.score ?? ''];
     const extraMeds = (d.meds || []).map(m => `${m.name} ${m.dose || ''}${m.time ? ' ' + m.time : ''}`).join('; ');
     if (!atks.length) rows.push([k, '', '', '', '', '', '', '', '', extraMeds, ...daily, ''].map(q).join(','));
@@ -1469,8 +1486,10 @@ const ACTIONS = {
   // ---- 打卡 ----
   'c-period': () => mutateDay(ui.sheet.date, d => { d.period = !d.period; }),
   'c-meal': el => mutateDay(ui.sheet.date, d => { d.meals ||= { b: false, l: false, d: false }; d.meals[el.dataset.m] = !d.meals[el.dataset.m]; }),
-  'c-caf': el => mutateDay(ui.sheet.date, d => { d.caffeine = Math.max(0, Math.min(10, (d.caffeine ?? 0) + +el.dataset.d)); }),
-  'c-alc': () => mutateDay(ui.sheet.date, d => { d.alcohol = !d.alcohol; }),
+  'c-caf': el => mutateDay(ui.sheet.date, d => {
+    const logged = (d.foods || []).filter(f => CAFFEINE_ITEMS.includes(f.item)).length;
+    d.caffeine = Math.max(logged, Math.min(10, (S.caffeineOf(d) ?? 0) + +el.dataset.d));
+  }),
   'c-sleep': el => mutateDay(ui.sheet.date, d => { d.sleep = Math.max(0, Math.min(16, (d.sleep ?? 7) + +el.dataset.d)); }),
   'c-sleep-set': el => mutateDay(ui.sheet.date, d => { d.sleep = +el.dataset.v; }),
   'c-feel': el => mutateDay(ui.sheet.date, d => { d.mood ||= { feelings: [], factors: [] }; d.mood.feelings ||= []; toggleIn(d.mood.feelings, el.dataset.v); }),
@@ -1483,7 +1502,12 @@ const ACTIONS = {
     if (!v) return toast('先写一下是什么');
     addLog(el.dataset.kind, el.dataset.cat, v);
   },
-  'log-del': el => mutateDay(ui.sheet.date, d => { const f = LOGS[el.dataset.kind].field; d[f] = (d[f] || []).filter(e => e.id !== el.dataset.id); }),
+  'log-del': el => mutateDay(ui.sheet.date, d => {
+    const f = LOGS[el.dataset.kind].field;
+    d[f] = (d[f] || []).filter(e => e.id !== el.dataset.id);
+    // 旧版会在记“酒类”时自动打开“喝了酒”；删掉最后一条酒类记录时一并清掉
+    if (f === 'foods' && d.alcohol && !d.foods.some(e => e.cat === '酒类')) delete d.alcohol;
+  }),
   'scale-open': el => openSheet({ type: 'scale', k: el.dataset.k, date: ui.sheet?.date || todayKey(), answers: new Array(SCALES[el.dataset.k].items.length).fill(null), back: ui.sheet?.type === 'checkin' ? ui.sheet.date : null }),
   'scale-ans': el => { ui.sheet.answers[+el.dataset.i] = +el.dataset.v; ui.sheet.dirty = true; renderSheet(); },
   'scale-save': () => {
@@ -1495,7 +1519,7 @@ const ACTIONS = {
     if (s.back) openSheet({ type: 'checkin', k: 'mood', date: s.back }); else closeSheet(true);
   },
   'log-kind': el => { ui.logKind = el.dataset.v; render(); },
-  'log-sel': el => { ui.logSel ||= {}; const k = ui.logKind || 'food'; ui.logSel[k] = ui.logSel[k] === el.dataset.v ? null : el.dataset.v; render(); },
+  'log-sel': el => { ui.logSel ||= {}; const k = el.dataset.kind; ui.logSel[k] = ui.logSel[k] === el.dataset.v ? null : el.dataset.v; render(); },
   categorize: () => openSheet({ type: 'categorize' }),
   'cat-assign': el => {
     const { kind, name, cat } = el.dataset, f = LOGS[kind].field;
@@ -1568,7 +1592,6 @@ function addLog(kind, cat, item) {
   const f = LOGS[kind].field;
   mutateDay(ui.sheet.date, d => {
     (d[f] ||= []).push({ id: uid(), cat, item, note: '' });
-    if (kind === 'food' && cat === '酒类') d.alcohol = true;
   });
 }
 

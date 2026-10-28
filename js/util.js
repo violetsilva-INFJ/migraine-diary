@@ -137,6 +137,8 @@ export const EXERCISE_CATALOG = [
 ];
 export const INTENSITY = { 1: '轻松', 2: '适中', 3: '剧烈' };
 // 常被提到的偏头痛相关食物（模型里的“常见诱发食物”；咖啡因和酒已单独分析，不重复计入）
+// 计入咖啡因的饮品（每条记录算 1 杯）
+export const CAFFEINE_ITEMS = ['咖啡', '奶茶', '浓茶', '能量饮料'];
 export const TRIGGER_FOODS = ['代糖饮料', '巧克力', '奶酪', '腌制 / 加工肉', '柑橘类', '味精 / 鸡精', '腌菜 / 发酵食品'];
 
 // GAD-7 / PHQ-9（过去两周），选项计 0–3 分

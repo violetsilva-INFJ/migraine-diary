@@ -15,7 +15,7 @@
 //    （饮食看当天或前一天，运动看当天），自由填写的条目归入“未分类”，分类后才进分析。
 // 10. 心理状态：心情（7 级愉快度）进入模型（情绪低落、压力），GAD-7 / PHQ-9 只做描述，不当作每日因素。
 
-import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth, vasOf, laterality, REGION_IDS, stressOf, TRIGGER_FOODS, UNCAT } from './util.js';
+import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth, vasOf, laterality, REGION_IDS, stressOf, TRIGGER_FOODS, UNCAT, CAFFEINE_ITEMS, FOOD_CATALOG } from './util.js';
 
 export const MIN_DAYS = 21;
 export const MIN_ATTACKS = 4;
@@ -41,6 +41,18 @@ export function hasDayData(d) {
     d.sleep != null || d.stress != null || d.mood != null || d.exercise != null || d.exIntensity != null ||
     (d.meds && d.meds.length > 0) || (d.foods && d.foods.length > 0) || (d.workouts && d.workouts.length > 0);
 }
+// 饮食记录推算咖啡因和饮酒（兼容旧版的“杯数”和“喝了酒”开关）
+const dietLogged = d => !!(d && (d.meals || (d.foods && d.foods.length) || d.caffeine != null || d.alcohol != null));
+export function caffeineOf(d) {
+  if (!dietLogged(d)) return null;
+  const n = (d.foods || []).filter(f => CAFFEINE_ITEMS.includes(f.item)).length;
+  return Math.max(d.caffeine ?? 0, n);
+}
+export function alcoholOf(d) {
+  if (!dietLogged(d)) return null;
+  return (d.foods || []).some(f => f.cat === '酒类') || d.alcohol === true;
+}
+
 // 需要保存的打卡（量表结果不算“每日打卡”，但也要保存）
 export const keepDay = d => hasDayData(d) || !!(d && (d.gad7 || d.phq9));
 
@@ -188,16 +200,17 @@ export const FEATURES = [
     get: d => d?.sleep == null ? null : +(d.sleep >= 9) },
   { key: 'stressHigh', label: '压力大', desc: '当天压力大或焦虑（来自心情记录）',
     get: d => stressOf(d) == null ? null : +(stressOf(d) === 3) },
-  { key: 'moodLow', label: '情绪低落', desc: '当天心情为「有点不愉快」或更差',
-    get: d => d?.mood?.valence != null ? +(d.mood.valence <= 3) : null },
+  // 看前一天：头痛本身会让当天心情变差，用前一天才能看出“心情差 → 头痛”的方向
+  { key: 'moodLow', label: '前一天情绪低落', desc: '前一天心情为「有点不愉快」或更差',
+    get: (d, prev) => prev?.mood?.valence != null ? +(prev.mood.valence <= 3) : null },
   { key: 'stressDrop', label: '压力骤降', desc: '压力比前一天低（“放松后头痛”）',
     get: (d, prev) => (stressOf(d) == null || stressOf(prev) == null) ? null : +(stressOf(prev) - stressOf(d) >= 1) },
   { key: 'mealSkip', label: '漏餐', desc: '当天至少有一餐没吃',
     get: d => !d?.meals ? null : +(['b', 'l', 'd'].some(m => d.meals[m] === false)) },
   { key: 'caffeineHigh', label: '咖啡因偏多', desc: '咖啡或浓茶 3 杯及以上',
-    get: d => d?.caffeine == null ? null : +(d.caffeine >= 3) },
+    get: d => caffeineOf(d) == null ? null : +(caffeineOf(d) >= 3) },
   { key: 'alcohol', label: '饮酒', desc: '当天或前一天喝了酒',
-    get: (d, prev) => (d?.alcohol == null && prev?.alcohol == null) ? null : +(!!d?.alcohol || !!prev?.alcohol) },
+    get: (d, prev) => (alcoholOf(d) == null && alcoholOf(prev) == null) ? null : +(!!alcoholOf(d) || !!alcoholOf(prev)) },
   { key: 'period', label: '经期前后', desc: '经期开始前 2 天到开始后 3 天',
     get: (d, prev, ctx) => ctx.known ? +ctx.inWindow : null },
   { key: 'exercise', label: '运动', desc: '当天运动 20 分钟以上',
@@ -353,7 +366,7 @@ export const CORR_VARS = [
   { key: 'sleep', label: '睡眠时长', get: d => d?.sleep },
   { key: 'mood', label: '心情', get: d => d?.mood?.valence },
   { key: 'stress', label: '压力', get: d => stressOf(d) },
-  { key: 'caffeine', label: '咖啡因', get: d => d?.caffeine },
+  { key: 'caffeine', label: '咖啡因', get: d => caffeineOf(d) },
   { key: 'exercise', label: '运动时长', get: d => d?.exercise },
 ];
 
@@ -605,12 +618,25 @@ export function qualityStats(attacks) {
   return { n: withQ.length, list, meanAll };
 }
 
-// ---------------- 饮食 / 运动：按大类或项目分析 ----------------
+// ---------------- 挑一个来分析：饮食 / 运动的大类或项目、心情里的感受或影响因素 ----------------
 const LOG = { food: 'foods', ex: 'workouts' };
 const matches = (e, key) => key.startsWith('cat:') ? e.cat === key.slice(4) : `${e.cat}/${e.item}` === key.slice(5);
 
-// 记录里出现过的大类和项目（按出现天数排序），以及未分类的条目
+// 记录里出现过的选项（按出现天数排序），以及未分类的条目
 export function logOptions(state, kind) {
+  const sort = m => [...m.entries()].sort((a, b) => b[1] - a[1]);
+  if (kind === 'mood') {
+    const fe = new Map(), fa = new Map();
+    for (const d of Object.values(state.days)) {
+      for (const x of d.mood?.feelings || []) fe.set(x, (fe.get(x) || 0) + 1);
+      for (const x of d.mood?.factors || []) fa.set(x, (fa.get(x) || 0) + 1);
+    }
+    return {
+      cats: sort(fe).map(([x, n]) => ({ key: `feel:${x}`, label: x, days: n })),
+      items: sort(fa).map(([x, n]) => ({ key: `fac:${x}`, label: x, days: n })),
+      uncat: [],
+    };
+  }
   const field = LOG[kind], cats = new Map(), items = new Map(), uncat = new Map();
   for (const d of Object.values(state.days)) {
     const seenC = new Set(), seenI = new Set();
@@ -621,7 +647,6 @@ export function logOptions(state, kind) {
       if (!seenI.has(ik)) { seenI.add(ik); items.set(ik, (items.get(ik) || 0) + 1); }
     }
   }
-  const sort = m => [...m.entries()].sort((a, b) => b[1] - a[1]);
   return {
     cats: sort(cats).map(([c, n]) => ({ key: `cat:${c}`, label: c, days: n })),
     items: sort(items).map(([ik, n]) => ({ key: `item:${ik}`, label: ik.split('/').slice(1).join('/'), cat: ik.split('/')[0], days: n })),
@@ -629,19 +654,69 @@ export function logOptions(state, kind) {
   };
 }
 
-// 某个大类 / 项目和头痛的关系。饮食：当天或前一天；运动：当天。只用记过这类内容的日子做比较。
-export function logEffect(state, rows, kind, key) {
+// 暴露的定义：饮食看当天或前一天；运动看当天；心情看前一天（避免“头痛让心情变差”的反向关系）
+function exposure(kind, key) {
+  if (kind === 'mood') {
+    const [type, x] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    const field = type === 'feel' ? 'feelings' : 'factors';
+    return (d, prev) => prev?.mood ? +(prev.mood[field] || []).includes(x) : null;
+  }
   const field = LOG[kind];
   const logged = d => !!(d && ((d[field] && d[field].length) || (kind === 'food' ? d.meals : d.exercise != null)));
   const has = d => (d?.[field] || []).some(e => matches(e, key));
-  const F = {
-    key: 'custom',
-    get: (d, prev) => kind === 'food'
-      ? (!logged(d) && !logged(prev) ? null : +(has(d) || has(prev)))
-      : (!logged(d) ? null : +has(d)),
+  return kind === 'food'
+    ? (d, prev) => (!logged(d) && !logged(prev) ? null : +(has(d) || has(prev)))
+    : d => (!logged(d) ? null : +has(d));
+}
+
+// 校正时去掉和所选项重叠的因素（例如选了“酒类”就不再放“饮酒”），否则两者会互相抵消
+function overlapping(kind, key) {
+  if (kind === 'ex') return ['exercise', 'hardExercise'];
+  if (kind === 'mood') return ['moodLow', 'stressHigh', 'stressDrop'];
+  const items = key.startsWith('cat:') ? (FOOD_CATALOG.find(c => c.cat === key.slice(4))?.items || []) : [key.slice(key.indexOf('/') + 1)];
+  const cat = key.startsWith('cat:') ? key.slice(4) : key.slice(5, key.indexOf('/'));
+  const out = [];
+  if (cat === '酒类') out.push('alcohol');
+  if (items.some(i => CAFFEINE_ITEMS.includes(i))) out.push('caffeineHigh');
+  if (items.some(i => TRIGGER_FOODS.includes(i))) out.push('foodTrigger');
+  return out;
+}
+
+export function pickEffect(state, rows, kind, key) {
+  const get = exposure(kind, key);
+  const sub = rows.map(r => ({ ...r, f: { ...r.f, custom: get(r.day, r.prev) } })).filter(r => r.f.custom != null);
+  const C = { key: 'custom', label: '所选项' };
+  const uni = univariate(sub, C);
+  const out = { uni, nDays: sub.length };
+  const nA = sub.reduce((t, r) => t + r.y, 0);
+  if (sub.length < MIN_DAYS || nA < MIN_ATTACKS || uni.nE < 3 || uni.nU < 3) return out;
+  const skip = overlapping(kind, key);
+  const others = eligibleFeatures(sub).filter(F => !skip.includes(F.key));
+  const m = fitLogit(sub, [C, ...others]);
+  if (m) out.adj = { ...effectOf(m.beta[1], Math.sqrt(m.cov[1][1])), with: others.map(F => F.label) };
+  return out;
+}
+
+// GAD-7 / PHQ-9 与同期（量表日期前 14 天）头痛天数对照
+export function scaleVsHeadache(state) {
+  const byDay = indexAttacks(state.attacks);
+  const dates = Object.values(state.days).filter(d => d.gad7 || d.phq9).map(d => d.date).sort();
+  const rows = dates.map(date => {
+    let head = 0, rec = 0;
+    for (let i = 0; i < 14; i++) {
+      const k = shiftKey(date, -i);
+      if (byDay.has(k)) head++;
+      if (byDay.has(k) || hasDayData(state.days[k])) rec++;
+    }
+    return { date, gad7: state.days[date].gad7?.score ?? null, phq9: state.days[date].phq9?.score ?? null, head, rec };
+  });
+  const rho = key => {
+    const pts = rows.filter(r => r[key] != null && r.rec >= 7);
+    if (pts.length < 4) return { n: pts.length, rho: null };
+    const r = pearson(ranks(pts.map(p => p[key])), ranks(pts.map(p => p.head)));
+    return { n: pts.length, rho: r };
   };
-  const tmp = rows.map(r => ({ y: r.y, f: { custom: F.get(r.day, r.prev) } }));
-  return univariate(tmp, F);
+  return { rows: rows.reverse(), gad7: rho('gad7'), phq9: rho('phq9') };
 }
 
 // ---------------- 心理状态 ----------------
