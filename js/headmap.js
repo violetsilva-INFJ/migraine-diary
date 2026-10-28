@@ -1,76 +1,256 @@
-// 头部示意图：正面（镜像，屏幕左边 = 自己的左边）和背面，区域可点选或显示热力
-// 区域按顺序叠放：后画的盖住先画的，每块区域用卡片底色描边形成缝隙，所以边界是平滑曲线。
+// 头部示意图：文艺复兴风格的素描人像（女 / 男），四个视角：正面、左侧、右侧、背面。
+// 正面按镜像显示（屏幕左边 = 自己的左边）；侧面图可以大面积点选太阳穴、耳上方、后脑和后颈。
+// 区域按顺序叠放，后画的盖住先画的；区域底色与纸色相同，所以只看得到虚线分界。
 import { REGIONS } from './util.js';
 
-const FRONT_HEAD = 'M100 18C138 18 164 46 166 86C167 104 165 118 162 130C158 156 146 176 128 188C118 195 109 198 100 198C91 198 82 195 72 188C54 176 42 156 38 130C35 118 33 104 34 86C36 46 62 18 100 18Z';
-const BACK_HEAD = 'M100 18C138 18 166 46 166 90C166 128 150 164 126 180C116 186 108 188 100 188C92 188 84 186 74 180C50 164 34 128 34 90C34 46 62 18 100 18Z';
-const SHOULDERS = 'M20 240C26 221 50 211 79 207Q100 213 121 207C150 211 174 221 180 240Z';
-const NECK = 'M80 168V210Q100 219 120 210V168Z';
-const EARS = ['M37 98C27 95 21 104 22 116C23 128 29 138 38 137Z', 'M163 98C173 95 179 104 178 116C177 128 171 138 162 137Z'];
-const EAR_IN = ['M33 106C28.5 109 28 117 30.5 125', 'M167 106C171.5 109 172 117 169.5 125'];
+const W = 240;
 
-const CAP = 'M0 0H200V72C170 54 136 46 100 46C64 46 30 54 0 72Z';
-const LEFT = 'M0 0H100V240H0Z', RIGHT = 'M100 0H200V240H100Z';
+// ---- 绝对坐标路径的水平镜像（用于左右对称的线条） ----
+function mirror(d) {
+  const tok = d.match(/[a-zA-Z]|-?\d*\.?\d+/g), out = [];
+  const arity = { M: 2, L: 2, C: 6, Q: 4, S: 4, T: 2, H: 1, V: 1, A: 7, Z: 0 };
+  let cmd = '', k = 0;
+  for (const t of tok) {
+    if (/[a-zA-Z]/.test(t)) { cmd = t; k = 0; out.push(t); continue; }
+    const n = arity[cmd], pos = k++ % n;
+    let v = +t;
+    if (cmd === 'H' || ('MLCQST'.includes(cmd) && pos % 2 === 0) || (cmd === 'A' && pos === 5)) v = W - v;
+    if (cmd === 'A' && pos === 4) v = 1 - v;
+    out.push(+v.toFixed(2));
+  }
+  return out.join(' ');
+}
+const sym = (cls, ...ds) => ds.flatMap(d => [[cls, d], [cls, mirror(d)]]);
+const circle = (cx, cy, r) => `M${cx - r} ${cy}A${r} ${r} 0 1 0 ${cx + r} ${cy}A${r} ${r} 0 1 0 ${cx - r} ${cy}Z`;
+const hatch = (x, y, dx, dy, n, sx, sy) => Array.from({ length: n }, (_, i) => `M${x + i * sx} ${y + i * sy}L${x + dx + i * sx} ${y + dy + i * sy}`).join('');
+// 卷发：在给定范围里随机（固定种子）撒下大小、方向不一的弧形笔触
+function tufts(test, x0, x1, y0, y1, count, seed) {
+  let s = seed, d = '', placed = 0, tries = 0;
+  const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  while (placed < count && tries++ < count * 60) {
+    const x = x0 + rnd() * (x1 - x0), y = y0 + rnd() * (y1 - y0);
+    if (!test(x, y)) continue;
+    const r = 3.2 + rnd() * 4.2, a0 = rnd() * Math.PI * 2, sw = Math.PI * (1.05 + rnd() * 0.55);
+    const p = a => `${(x + r * Math.cos(a)).toFixed(1)} ${(y + r * 0.85 * Math.sin(a)).toFixed(1)}`;
+    d += `M${p(a0)}A${r.toFixed(1)} ${(r * 0.85).toFixed(1)} 0 ${sw > Math.PI ? 1 : 0} 1 ${p(a0 + sw)}`;
+    placed++;
+  }
+  return d;
+}
 
-const FRONT = [
-  ['face-L', LEFT], ['face-R', RIGHT],
-  ['temple-L', 'M0 48C24 48 52 50 64 56C60 80 60 104 66 128C44 132 20 134 0 134Z'],
-  ['temple-R', 'M200 48C176 48 148 50 136 56C140 80 140 104 134 128C156 132 180 134 200 134Z'],
-  ['eye-L', 'M64 88C72 83 92 83 100 87V123C92 127 72 127 64 122C60 110 60 100 64 88Z'],
-  ['eye-R', 'M136 88C128 83 108 83 100 87V123C108 127 128 127 136 122C140 110 140 100 136 88Z'],
-  ['forehead-L', 'M58 26H100V87C92 83 72 83 64 88C60 74 58 56 58 26Z'],
-  ['forehead-R', 'M142 26H100V87C108 83 128 83 136 88C140 74 142 56 142 26Z'],
-  ['vertex', CAP],
-];
-const BACK_NECK = [
-  ['neck-L', 'M80 166V210Q90 217 100 217V166Z'],
-  ['neck-R', 'M120 166V210Q110 217 100 217V166Z'],
-];
-const BACK = [['occiput-L', LEFT], ['occiput-R', RIGHT], ['vertex', CAP]];
+// ---- 头部轮廓（区域的裁剪范围） ----
+const ENV = {
+  front: {
+    female: 'M120 34C80 34 56 62 54 102C53 130 55 152 62 170C72 196 94 218 120 224C146 218 168 196 178 170C185 152 187 130 186 102C184 62 160 34 120 34Z',
+    male: 'M120 32C84 32 60 62 64 104C64 132 66 158 74 180C84 202 102 218 120 222C138 218 156 202 166 180C174 158 176 132 176 104C180 62 156 32 120 32Z',
+  },
+  profile: {
+    male: 'M108 30C150 26 184 46 190 84C192 98 192 108 192 114L206 150C209 156 205 160 198 160L198 168C200 172 198 176 194 178C198 184 196 192 190 196L188 204C184 214 172 218 158 220C148 221 140 218 134 216C120 214 106 208 96 198C78 182 60 160 54 128C50 100 56 70 72 50C82 38 94 32 108 30Z',
+    // 女性侧面把发髻也算进后脑
+    female: 'M108 30C150 26 184 46 190 84C192 98 192 108 192 114L206 150C209 156 205 160 198 160L198 168C200 172 198 176 194 178C198 184 196 192 190 196L188 204C184 214 172 218 158 220C148 221 140 218 134 216C120 214 106 208 96 198C90 192 86 186 82 180C70 188 48 186 41 168C35 152 44 136 58 132C52 104 56 70 72 50C82 38 94 32 108 30Z',
+  },
+  back: 'M120 30C164 30 192 62 192 108C192 150 176 186 150 200C140 205 130 206 120 206C110 206 100 205 90 200C64 186 48 150 48 108C48 62 76 30 120 30Z',
+};
+const NECK = {
+  profile: 'M96 196C100 220 100 244 96 270H158C152 248 150 230 152 218Z',
+  back: 'M94 196C96 222 94 246 88 270H152C146 246 144 222 146 196Z',
+};
 
-// 安静闭眼的面部线条
-const FACE = [
-  'M70 93Q81 87.5 92 91', 'M108 91Q119 87.5 130 93',
-  'M71 106.5Q81 112 91 106.5', 'M109 106.5Q119 112 129 106.5',
-  'M100 113C99 122 96.5 128.5 94.5 132.5Q100 136 105.5 132.5',
-  'M89 160Q100 165.5 111 160',
+// ---- 各视角的区域（S 表示看到的那一侧） ----
+const L = 'M0 0H120V300H0Z', Rt = 'M120 0H240V300H120Z';
+const REG = {
+  front: [
+    ['face-L', L], ['face-R', Rt],
+    ['temple-L', 'M0 70C30 70 66 72 82 80C78 108 78 136 84 162C60 166 30 168 0 168Z'],
+    ['temple-R', mirror('M0 70C30 70 66 72 82 80C78 108 78 136 84 162C60 166 30 168 0 168Z')],
+    ['eye-L', 'M82 112C92 106 112 106 120 110V152C112 156 92 156 82 150C78 138 78 124 82 112Z'],
+    ['eye-R', mirror('M82 112C92 106 112 106 120 110V152C112 156 92 156 82 150C78 138 78 124 82 112Z')],
+    ['forehead-L', 'M76 40H120V110C112 106 92 106 82 112C78 94 76 70 76 40Z'],
+    ['forehead-R', mirror('M76 40H120V110C112 106 92 106 82 112C78 94 76 70 76 40Z')],
+    ['vertex', 'M0 0H240V96C204 72 164 62 120 62C76 62 36 72 0 96Z'],
+  ],
+  profile: S => [
+    [`face-${S}`, 'M128 138H240V260H128Z'],
+    [`occiput-${S}`, 'M0 0H110C106 60 102 150 112 240H0Z'],
+    [`parietal-${S}`, 'M104 40H158V128C140 126 124 128 108 134C104 102 104 70 104 40Z'],
+    [`forehead-${S}`, 'M150 30H240V124H150Z'],
+    [`temple-${S}`, 'M144 82H178C176 102 176 122 180 146H144C142 124 142 102 144 82Z'],
+    [`eye-${S}`, 'M164 112C172 108 186 108 196 114L198 140C188 146 172 146 162 142C160 132 160 120 164 112Z'],
+    ['vertex', 'M0 0H240V54C210 55 180 57 150 59C110 61 80 66 40 82L0 98Z'],
+  ],
+  profileNeck: S => [[`neck-${S}`, 'M40 180H128V300H40Z']],
+  back: [
+    ['occiput-L', L], ['occiput-R', Rt],
+    ['parietal-L', 'M0 50C30 52 60 58 84 66C78 92 78 118 84 146C56 150 28 152 0 152Z'],
+    ['parietal-R', mirror('M0 50C30 52 60 58 84 66C78 92 78 118 84 146C56 150 28 152 0 152Z')],
+    ['vertex', 'M0 0H240V92C204 70 164 60 120 60C76 60 36 70 0 92Z'],
+  ],
+  backNeck: [['neck-L', 'M40 180H120V300H40Z'], ['neck-R', 'M120 180H200V300H120Z']],
+};
+
+// ---- 素描线条：c 轮廓（粗） l 普通 t 细 h 排线 f 实心 ----
+const maleFrontCurls = tufts((x, y) => ((x - 120) / 54) ** 2 + ((y - 100) / 66) ** 2 < 0.9 && y < 64 + ((x - 120) / 50) ** 2 * 34 - 6, 64, 176, 38, 98, 34, 11);
+const maleProfileCurls = tufts((x, y) => ((x - 112) / 57) ** 2 + ((y - 92) / 63) ** 2 < 0.88 && x < 150 - Math.max(0, y - 80) * 0.45 && (x - 126) ** 2 + (y - 150) ** 2 > 26 ** 2 && y < 172, 56, 168, 34, 170, 74, 23);
+const maleBackCurls = tufts((x, y) => ((x - 120) / 69) ** 2 + ((y - 108) / 75) ** 2 < 0.86 && y < 188, 52, 188, 40, 186, 108, 41);
+
+// 正面眼睛：上眼睑压住虹膜上缘，只露出下半圆
+const eyeFront = (cx, cy) => [
+  ['l', `M${cx - 11} ${cy + 1}C${cx - 5} ${cy - 6} ${cx + 5} ${cy - 6} ${cx + 11} ${cy}`],
+  ['t', `M${cx - 11} ${cy + 1}C${cx - 4} ${cy + 6} ${cx + 5} ${cy + 6} ${cx + 11} ${cy}`],
+  ['t', `M${cx - 9} ${cy - 4}C${cx - 3} ${cy - 10} ${cx + 5} ${cy - 10} ${cx + 10} ${cy - 5}`],
+  ['t', `M${cx - 3.8} ${cy - 2.6}A4 4 0 0 0 ${cx + 3.8} ${cy - 2.6}`],
+  ['f', `M${cx - 1.6} ${cy - 0.6}A1.6 1.6 0 1 0 ${cx + 1.6} ${cy - 0.6}A1.6 1.6 0 1 0 ${cx - 1.6} ${cy - 0.6}Z`],
 ];
-const NAPE = 'M74 170Q100 181 126 170';
+
+const eyes = (cx, cy) => eyeFront(cx, cy).flatMap(([c, d]) => [[c, d], [c, mirror(d)]]);
+
+const ART = {
+  female: {
+    front: [
+      ['c', 'M76 96C72 118 72 142 76 162C82 190 98 214 120 222C142 214 158 190 164 162C168 142 168 118 164 96'],
+      ...sym('c', 'M120 34C80 34 56 62 54 102C52 140 50 176 44 210C40 232 36 252 30 270'),
+      ...sym('l', 'M120 38C110 46 100 52 92 58C82 66 76 80 76 98', 'M76 160C74 184 70 204 62 226C56 242 50 256 44 270'),
+      ...sym('t', 'M110 42C92 52 78 70 70 100C66 126 64 152 60 180', 'M100 42C80 54 66 76 62 110C60 142 58 172 52 204', 'M88 46C70 60 60 88 58 124C56 162 52 198 44 234', 'M72 72C64 92 62 120 62 150'),
+      ...sym('t', 'M86 117C92 112 102 111 110 115'),
+      ...sym('l', 'M88 116C93 113 101 112 108 114'),
+      ...eyes(99, 131),
+      ['l', 'M116 121C116 135 115 149 112 159C110 164 113 167 117 166'], ['t', 'M124 166C128 167 130 164 128 159'], ['t', 'M117 166C119 168 122 168 124 166'],
+      ['l', 'M107 187C112 184 116 183 120 185C124 183 128 184 133 187'], ['t', 'M107 187C113 189 127 189 133 187'], ['l', 'M110 190C115 195 125 195 130 190'],
+      ...sym('l', 'M102 216C103 232 102 248 98 262', 'M98 262C78 268 52 274 34 292'),
+      ['t', 'M82 292C100 280 140 280 158 292'],
+      ['h', [
+        hatch(156, 140, -5, 12, 5, 2.6, 2), hatch(160, 170, -6, 12, 5, -1.6, 3.6), hatch(146, 196, -5, 10, 4, -3, 2.4),
+        hatch(124, 224, -5, 12, 7, 2.6, 0), hatch(110, 140, 1, 9, 3, 0, 5), hatch(126, 124, 3, 6, 3, 1.5, 3),
+        hatch(70, 104, -3, 14, 4, 2, 5), hatch(166, 104, 3, 14, 4, -2, 5), hatch(116, 205, 2, 5, 4, 2.4, 0.4),
+      ].join('')],
+    ],
+    profile: [
+      ['c', 'M176 58C186 76 190 92 190 110C191 118 196 130 204 148C206 154 204 158 198 159C196 163 197 166 197 168C199 172 197 175 193 177C197 182 196 189 191 193C189 200 186 206 182 210C176 216 166 218 156 218'],
+      ['t', 'M156 218C148 216 142 212 138 206C134 198 132 188 132 178'],
+      ['l', 'M156 218C152 236 152 256 156 282'], ['l', 'M98 196C102 222 102 252 96 282'],
+      ['c', 'M176 58C170 38 146 26 116 28C86 30 62 48 56 80C52 104 54 124 60 138'],
+      ['c', 'M62 132C44 134 36 152 42 168C48 184 70 188 82 178C92 168 92 148 80 138C74 134 68 132 62 132Z'],
+      ['t', 'M64 142C54 146 52 160 60 167C68 174 80 166 76 155C74 149 68 148 64 151'],
+      ['t', 'M50 150C46 158 48 168 56 174'], ['t', 'M58 138C66 136 74 140 78 146'],
+      ['l', 'M90 124C96 142 96 162 88 182'], ['t', 'M94 126C100 144 100 162 92 182'],
+      ['t', 'M174 64C150 48 116 46 94 60C80 70 74 88 76 108C78 120 82 128 88 134'],
+      ['t', 'M172 72C152 60 124 60 104 72C92 82 88 98 90 116'], ['t', 'M170 84C156 76 136 76 120 86C110 94 106 106 108 120'],
+      ['t', 'M160 46C140 34 110 34 88 46C72 56 64 72 62 92'], ['t', 'M146 36C124 30 98 34 80 46'], ['t', 'M172 90C164 96 160 106 160 118'], ['t', 'M96 182C94 188 96 194 100 198'],
+      ['l', 'M134 138C128 130 120 132 120 144C120 156 126 166 134 168C138 168 140 164 139 160'], ['t', 'M127 144C126 150 128 156 132 158'],
+      ['l', 'M170 125C176 121 182 121 187 124'], ['t', 'M171 127C176 130 182 129 187 125'], ['t', 'M180 122C178 124 178 127 180 129'], ['t', 'M168 120C174 116 182 116 186 119'],
+      ['l', 'M166 113C174 108 182 108 188 111'], ['t', 'M195 156C191 156 189 154 190 151'], ['t', 'M190 170L196 170'],
+      ['l', 'M96 282C80 286 60 290 44 300'], ['l', 'M156 282C172 284 196 290 214 300'], ['t', 'M120 300C130 292 146 290 160 294'],
+      ['h', [
+        hatch(140, 222, -5, 14, 7, 3.4, 0), hatch(162, 148, -4, 10, 5, 2.4, 1.6), hatch(104, 206, -3, 14, 4, 4, 0),
+        hatch(142, 140, -3, 10, 3, 2.5, 4), hatch(176, 196, -4, 8, 3, 2.6, -1), hatch(182, 134, -2, 6, 3, 2, 0.5),
+      ].join('')],
+    ],
+    back: [
+      ...sym('c', 'M120 32C164 32 190 62 190 108C190 140 180 166 164 182C156 191 148 196 140 198'),
+      ['c', 'M120 140C102 140 92 152 94 168C96 184 110 192 124 190C140 188 148 174 146 160C144 148 134 140 120 140Z'],
+      ['t', 'M120 150C108 152 104 164 110 172C116 180 130 176 132 166C134 158 128 152 120 154'],
+      ['t', 'M120 34C114 70 112 108 116 140'],
+      ...sym('t', 'M104 36C92 70 94 110 104 142', 'M86 44C70 76 74 118 96 148', 'M70 62C58 94 66 132 94 160', 'M58 88C54 116 62 146 90 170', 'M110 194C108 200 109 206 111 210'),
+      ...sym('t', 'M52 112C46 112 43 122 45 132C47 142 51 146 55 146'),
+      ...sym('l', 'M100 194C102 222 100 248 94 270', 'M94 270C74 274 52 282 34 296'),
+      ['h', [hatch(104, 204, 4, 12, 5, 6.4, 0), hatch(132, 186, 4, 8, 4, 3, 0.5), hatch(140, 200, -2, 14, 3, 2.6, 4)].join('')],
+    ],
+  },
+  male: {
+    front: [
+      ['c', 'M70 102C68 130 70 158 78 180C86 200 102 214 120 220C138 214 154 200 162 180C170 158 172 130 170 102'],
+      ['c', 'M66 104C58 62 84 32 120 32C156 32 182 62 174 104'],
+      ['l', 'M70 100C72 84 82 72 96 68C108 64 132 64 144 68C158 72 168 84 170 100'],
+      ['t', maleFrontCurls],
+      ...sym('l', 'M68 122C60 118 56 128 57 140C58 152 63 160 71 160', 'M84 118C92 112 104 112 112 117'),
+      ...sym('t', 'M63 130C61 136 62 146 65 150', 'M86 115C94 110 104 110 111 114'),
+      ...eyes(99.5, 132),
+      ['l', 'M115 120C115 136 114 150 110 161C108 166 112 170 117 168'], ['t', 'M123 168C128 170 132 166 130 161'],
+      ['t', 'M117 168C119 170 121 170 123 168'], ['t', 'M125 124C126 136 127 148 129 158'],
+      ['l', 'M106 189C112 187 116 186 120 187C124 186 128 187 134 189'], ['t', 'M109 191C114 195 126 195 131 191'],
+      ['t', 'M117 212C119 214 121 214 123 212'],
+      ...sym('l', 'M96 212C96 230 94 248 90 262', 'M90 262C70 266 46 274 26 292'),
+      ['t', 'M116 236C119 233 123 233 126 236'], ['t', 'M98 292C108 278 132 278 142 292'],
+      ['h', [
+        hatch(156, 142, -5, 12, 5, 2.4, 2.2), hatch(160, 172, -6, 12, 5, -1.8, 3.6), hatch(148, 198, -5, 10, 4, -3, 2.4),
+        hatch(126, 222, -5, 12, 7, 2.6, 0), hatch(109, 142, 1, 9, 3, 0, 5), hatch(126, 124, 3, 6, 3, 1.5, 3),
+        hatch(76, 108, -2, 12, 3, 2, 5), hatch(118, 202, 2, 5, 4, 2.4, 0.4),
+      ].join('')],
+    ],
+    profile: [
+      ['c', 'M172 54C182 68 188 88 189 102C190 110 193 115 196 119C199 129 203 140 208 150C210 156 206 160 199 160C198 164 199 167 198 169C200 173 198 176 194 178C198 183 197 190 192 194C191 202 190 208 186 212C178 220 166 222 150 222'],
+      ['l', 'M150 222C140 220 134 214 132 204C130 192 130 182 132 174'],
+      ['l', 'M134 134C126 126 114 130 114 144C114 158 120 170 130 172C136 172 138 168 137 162'],
+      ['t', 'M122 142C121 150 123 158 128 160'], ['t', 'M126 148C128 146 130 148 130 150'],
+      ['c', 'M172 56C166 34 140 24 112 26C82 28 60 46 54 78C50 100 54 122 62 140C70 156 82 170 96 182'],
+      ['l', 'M172 56C164 60 158 70 156 82C152 92 148 98 142 104C138 110 136 120 138 130'],
+      ['t', maleProfileCurls],
+      ['l', 'M168 124C174 120 180 120 185 123'], ['t', 'M169 126C174 129 180 128 185 124'], ['t', 'M166 119C172 115 180 115 185 118'],
+      ['l', 'M162 112C170 106 180 105 189 109'], ['t', 'M164 110C172 104 180 104 188 107'],
+      ['t', 'M196 156C192 156 190 154 191 151'], ['t', 'M191 170L197 170'],
+      ['l', 'M150 222C150 240 152 262 158 284'], ['l', 'M151 234C157 237 158 244 153 248'], ['l', 'M96 182C102 210 100 250 92 284'],
+      ['l', 'M92 284C74 288 54 292 36 300'], ['l', 'M158 284C178 286 200 292 220 300'],
+      ['h', [
+        hatch(142, 226, -5, 14, 6, 3.4, 0), hatch(138, 186, -3, 12, 5, 3, 1.4), hatch(164, 148, -4, 10, 5, 2.4, 1.6),
+        hatch(104, 196, -3, 16, 4, 4, 0), hatch(178, 196, -4, 8, 3, 2.6, -1),
+      ].join('')],
+    ],
+    back: [
+      ...sym('c', 'M120 32C164 32 190 62 190 108C190 148 176 182 152 198'),
+      ['l', 'M88 196C104 204 136 204 152 196'],
+      ['t', maleBackCurls],
+      ...sym('l', 'M52 108C44 106 40 120 42 132C44 144 50 150 58 148', 'M96 200C96 226 92 250 84 270', 'M84 270C66 276 46 284 28 296'),
+      ['t', 'M120 210L120 262'],
+      ['h', [hatch(100, 208, 4, 12, 6, 6.6, 0), hatch(136, 214, -2, 14, 3, 3, 4), hatch(100, 214, 2, 14, 3, -3, 4)].join('')],
+    ],
+  },
+};
+
+export const VIEWS = [['front', '正面'], ['left', '左侧'], ['right', '右侧'], ['back', '背面']];
+export const VIEW_REGIONS = {
+  front: ['vertex', 'forehead-L', 'forehead-R', 'temple-L', 'temple-R', 'eye-L', 'eye-R', 'face-L', 'face-R'],
+  left: ['vertex', 'forehead-L', 'temple-L', 'eye-L', 'face-L', 'parietal-L', 'occiput-L', 'neck-L'],
+  right: ['vertex', 'forehead-R', 'temple-R', 'eye-R', 'face-R', 'parietal-R', 'occiput-R', 'neck-R'],
+  back: ['vertex', 'parietal-L', 'parietal-R', 'occiput-L', 'occiput-R', 'neck-L', 'neck-R'],
+};
 
 let n = 0;
 
-export function headSVG(view, { on = new Set(), heat = null, interactive = false } = {}) {
-  const id = `hm${++n}`, front = view === 'front';
-  const head = front ? FRONT_HEAD : BACK_HEAD;
+export function headSVG(view, { sex = 'female', on = new Set(), heat = null, interactive = false } = {}) {
+  const id = `hm${++n}`;
+  const side = view === 'left' ? 'L' : 'R', profile = view === 'left' || view === 'right';
+  const env = profile ? ENV.profile[sex] : view === 'front' ? ENV.front[sex] : ENV.back;
+  const regs = profile ? REG.profile(side) : REG[view];
+  const neckRegs = profile ? REG.profileNeck(side) : view === 'back' ? REG.backNeck : [];
+  const neck = profile ? NECK.profile : NECK.back;
+  const art = ART[sex][profile ? 'profile' : view];
+
   const region = ([rid, d]) => {
     const sel = on.has(rid), t = heat ? (heat[rid] || 0) : 0;
     const label = REGIONS[rid].label + (heat ? ` ${Math.round(t * 100)}%` : '');
     const attrs = interactive
       ? `data-act="region" data-id="${rid}" role="button" tabindex="0" aria-pressed="${sel}" aria-label="${label}"`
       : `role="img" aria-label="${label}"`;
-    return `<path class="region ${sel ? 'on' : ''}" d="${d}" ${sel ? `style="fill:url(#${id}-p)"` : ''} ${attrs}/>`
-      + (t > 0 ? `<path class="heat" d="${d}" style="fill:url(#${id}-p);fill-opacity:${(0.16 + 0.84 * t).toFixed(2)}"/>` : '');
+    const style = heat && t > 0 ? ` style="fill:color-mix(in srgb, var(--pain) ${Math.round(14 + 56 * t)}%, var(--paper))"` : '';
+    return `<path class="region ${sel ? 'on' : ''}" d="${d}"${style} ${attrs}/>`
+      + (sel ? `<path class="chalk" d="${d}" fill="url(#${id}-x)"/>` : '');
   };
-  return `<svg viewBox="14 6 172 234" class="head ${interactive ? 'interactive' : ''}" role="group" aria-label="${front ? '头部正面（镜像）' : '头部背面'}">
+  const lines = art.map(([cls, d]) => `<path class="a-${cls}" d="${d}"/>`).join('');
+  const flip = view === 'left' ? ' transform="matrix(-1 0 0 1 240 0)"' : '';
+  const sides = profile ? '' : `<g class="side-tags"><rect x="6" y="8" width="22" height="17" rx="8.5"/><text x="17" y="20.5">左</text>
+    <rect x="212" y="8" width="22" height="17" rx="8.5"/><text x="223" y="20.5">右</text></g>`;
+
+  return `<svg viewBox="0 0 240 300" class="head ${interactive ? 'interactive' : ''}" role="group" aria-label="头部${VIEWS.find(v => v[0] === view)[1]}">
     <defs>
-      <clipPath id="${id}-h"><path d="${head}"/></clipPath>
-      <clipPath id="${id}-n"><path d="${NECK}"/></clipPath>
-      <linearGradient id="${id}-p" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--pain-hi)"/><stop offset="1" style="stop-color:var(--pain)"/></linearGradient>
-      <radialGradient id="${id}-s" cx=".32" cy=".2" r=".8"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></radialGradient>
-      <linearGradient id="${id}-d" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".07"/></linearGradient>
+      <clipPath id="${id}-h"><path d="${env}"/></clipPath>
+      <clipPath id="${id}-n"><path d="${neck}"/></clipPath>
+      <pattern id="${id}-x" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M0 0V5" class="chalk-line"/></pattern>
     </defs>
-    <path class="base" d="${SHOULDERS}"/>
-    ${front ? `<path class="base" d="${NECK}"/>` : `<g clip-path="url(#${id}-n)">${BACK_NECK.map(region).join('')}</g>`}
-    ${EARS.map(d => `<path class="base" d="${d}"/>`).join('')}
-    ${front ? EAR_IN.map(d => `<path class="ear-in" d="${d}"/>`).join('') : ''}
-    <g clip-path="url(#${id}-h)">
-      ${(front ? FRONT : BACK).map(region).join('')}
-      <path class="sheen" d="${head}" fill="url(#${id}-s)"/>
-      <path d="${head}" fill="url(#${id}-d)" pointer-events="none"/>
+    <g${flip}>
+      ${neckRegs.length ? `<g clip-path="url(#${id}-n)">${neckRegs.map(region).join('')}</g>` : ''}
+      <g clip-path="url(#${id}-h)">${regs.map(region).join('')}</g>
+      <g class="art">${lines}</g>
     </g>
-    <path class="outline" d="${head}"/>
-    ${front ? FACE.map(d => `<path class="feat" d="${d}"/>`).join('') : `<path class="feat" d="${NAPE}" style="opacity:.6"/>`}
-    <rect class="side-bg" x="16" y="8" width="20" height="17" rx="8.5"/><text class="side" x="26" y="20.5" text-anchor="middle">左</text>
-    <rect class="side-bg" x="164" y="8" width="20" height="17" rx="8.5"/><text class="side" x="174" y="20.5" text-anchor="middle">右</text>
+    ${sides}
   </svg>`;
 }

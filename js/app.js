@@ -4,7 +4,7 @@ import {
   SEVERITY, SYMPTOMS, DURATIONS, durationOf, TRIGGERS, EFFECTS, RELIEF, STRESS, MEALS, DEFAULT_MEDS, icon,
   vasOf, sevOfVas, vasWord, REGIONS, REGION_IDS, LAT_LABEL, laterality, regionSummary, QUALITIES,
 } from './util.js';
-import { headSVG } from './headmap.js';
+import { headSVG, VIEWS, VIEW_REGIONS } from './headmap.js';
 import * as S from './stats.js';
 
 // ======================= 状态 =======================
@@ -141,7 +141,7 @@ function render() {
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
-const POP_ACTS = new Set(['a-toggle', 'a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-stress', 'c-ex', 'c-sleep-set', 'c-period', 'c-alc', 'sel-day', 'med-kind']);
+const POP_ACTS = new Set(['head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-stress', 'c-ex', 'c-sleep-set', 'c-period', 'c-alc', 'sel-day', 'med-kind']);
 let lastHit = null;
 const hitKey = el => `${el.dataset.act}|${el.dataset.v ?? el.dataset.id ?? el.dataset.i ?? el.dataset.k ?? el.dataset.m ?? ''}`;
 function popLast(root) {
@@ -165,6 +165,8 @@ function countUp(root) {
     };
     txt.textContent = (0).toFixed(dec);
     requestAnimationFrame(step);
+    // 万一动画帧被系统暂停，也保证最后显示的是真实数值
+    setTimeout(() => { txt.textContent = target.toFixed(dec); }, dur + 150);
   });
 }
 const counted = (v, dec = 0) => v == null || !isFinite(v) ? '—' : `<span data-count="${v}" data-dec="${dec}">${Number(v).toFixed(dec)}</span>`;
@@ -504,9 +506,7 @@ function locationCard(list) {
   const latBox = (k, label) => `<div><b>${R.latN ? pct(R.lat[k] / R.latN) : '—'}</b><span>${label} ${R.lat[k]}</span></div>`;
   return `<section class="card">
     <div class="card-head"><h3>疼痛部位</h3><span class="meta">${R.n} 次有部位图</span></div>
-    ${R.n ? `<div class="headmap">
-      <figure>${headSVG('front', { heat: R.heat })}<figcaption>正面（镜像）</figcaption></figure>
-      <figure>${headSVG('back', { heat: R.heat })}<figcaption>背面</figcaption></figure></div>
+    ${R.n ? `<div class="hm-grid">${VIEWS.map(([k, l]) => `<figure><div class="hm-paper">${headSVG(k, { sex: figure(), heat: R.heat })}</div><figcaption>${l}</figcaption></figure>`).join('')}</div>
     <div class="heat-legend"><span>少</span><i></i><span>多</span></div>` : ''}
     <div class="lat">${latBox('L', '左侧')}${latBox('R', '右侧')}${latBox('B', '双侧')}${latBox('M', '头顶')}</div>
     ${R.top.length ? `<div style="margin-top:8px">${R.top.slice(0, 5).map(id => `<div class="hbar"><span class="lbl">${REGIONS[id].label}</span><div class="track"><div class="fill" style="width:${R.heat[id] * 100}%"></div></div><span class="val">${pct(R.heat[id])}</span></div>`).join('')}</div>` : ''}
@@ -734,7 +734,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.2</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.3</div></div></div>
   </div>`;
 }
 
@@ -874,13 +874,18 @@ function updateStartPicker() {
   box.querySelector('.dt-time').textContent = hhmm(dt);
 }
 
+const VIEW_CAPTION = { front: '正面 · 镜像，左边就是你的左边', left: '从左边看', right: '从右边看', back: '背面 · 左边就是你的左边' };
+const figure = () => state.settings.figure || 'female';
+
 function regionPicker(d) {
-  const on = new Set(d.regions);
+  const on = new Set(d.regions), view = ui.headView || 'front', sex = figure();
   const legacy = !d.regions.length && d.locations?.length ? `<p class="note" style="margin-top:6px">旧记录的部位：${esc(d.locations.join('、'))}</p>` : '';
-  return `<div class="headmap">
-      <figure>${headSVG('front', { on, interactive: true })}<figcaption>正面（镜像）</figcaption></figure>
-      <figure>${headSVG('back', { on, interactive: true })}<figcaption>背面</figcaption></figure>
+  return `<div class="hm-tools">
+      <div class="seg-ctl" role="group" aria-label="视角">${VIEWS.map(([k, l]) => `<button class="${view === k ? 'on' : ''}" data-act="head-view" data-v="${k}" aria-pressed="${view === k}">${l}${VIEW_REGIONS[k].some(id => on.has(id)) ? '<i class="dot" aria-label="有选中区域"></i>' : ''}</button>`).join('')}</div>
+      <div class="seg-ctl sex" role="group" aria-label="人像">${[['female', '女'], ['male', '男']].map(([k, l]) => `<button class="${sex === k ? 'on' : ''}" data-act="figure" data-v="${k}" aria-pressed="${sex === k}" aria-label="${l}性形象">${l}</button>`).join('')}</div>
     </div>
+    <div class="hm-paper">${headSVG(view, { sex, on, interactive: true })}</div>
+    <p class="note" style="text-align:center;margin-top:6px">${VIEW_CAPTION[view]}</p>
     <div class="region-summary">
       ${d.regions.length ? `<span class="badge up">${esc(regionSummary(d))}</span>` : '<span class="muted" style="font-size:13.5px">点选疼痛的区域，可多选</span>'}
       <span style="margin-left:auto;display:flex;gap:6px">
@@ -900,7 +905,7 @@ function attackBody(d) {
   return [
     sec('开始时间', startPicker(d)),
     sec('疼痛强度', vasWidget(d.vas)),
-    sec('疼痛部位', regionPicker(d), '<small>屏幕左边就是你的左边</small>'),
+    sec('疼痛部位', regionPicker(d), '<small>可多选，切换视角更好选</small>'),
     sec('疼痛性质', multi('qualities', QUALITIES), '<small>可多选</small>'),
     sec('伴随症状', multi('symptoms', SYMPTOMS), '<small>可多选</small>'),
     sec('持续时间', `<div class="chips">${DURATIONS.map(o => `<button class="chip ${d.duration === o.k ? 'on' : ''}" data-act="a-dur" data-v="${o.k}" aria-pressed="${d.duration === o.k}">${o.label}</button>`).join('')}</div>`),
@@ -1201,6 +1206,8 @@ const ACTIONS = {
 
   // ---- 头痛表单 ----
   'a-ago': el => { draft().start = toLocalInput(new Date(Date.now() - +el.dataset.v * 60000)); touch(); },
+  'head-view': el => { ui.headView = el.dataset.v; renderSheet(); },
+  figure: el => { state.settings.figure = el.dataset.v; saveSettings(); renderSheet(); },
   region: el => {
     const r = draft().regions, id = el.dataset.id, i = r.indexOf(id);
     if (i >= 0) r.splice(i, 1); else r.push(id);

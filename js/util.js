@@ -47,6 +47,8 @@ export const REGIONS = {
   'forehead-R': { label: '右前额', area: '前额', side: 'R' },
   'temple-L': { label: '左太阳穴', area: '太阳穴', side: 'L' },
   'temple-R': { label: '右太阳穴', area: '太阳穴', side: 'R' },
+  'parietal-L': { label: '左耳上方', area: '耳上方', side: 'L' },
+  'parietal-R': { label: '右耳上方', area: '耳上方', side: 'R' },
   'eye-L': { label: '左眼周', area: '眼周', side: 'L' },
   'eye-R': { label: '右眼周', area: '眼周', side: 'R' },
   'face-L': { label: '左面颊', area: '面颊', side: 'L' },
