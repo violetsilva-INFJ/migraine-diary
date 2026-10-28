@@ -50,8 +50,10 @@ function splitClauses(text) {
 // “昨晚……，早上起来……” 里的早上是今天
 function markDays(cls) {
   let off = 0, night = false;
+  // “比昨天轻一点”里的昨天是拿来比较的，不代表这句说的是昨天
+  const cmpStrip = new RegExp(`(?:比起?|较|没有|没|不如|不像|跟|和|与|同|像)\\s*(?:${REF_ALT})`, 'g');
   for (const c of cls) {
-    const t = c.t;
+    const t = c.t.replace(cmpStrip, '');
     let o = null, n = false;
     if (/前天|前晚/.test(t)) { o = -2; n = /前晚|前天(晚上|夜里|半夜)/.test(t); }
     else if (/昨/.test(t)) { o = -1; n = /昨(晚|夜)|昨天(晚上|夜里|半夜)/.test(t); }
@@ -65,7 +67,7 @@ function markDays(cls) {
 // ---------- 结果 ----------
 class Result {
   constructor(text, now) {
-    this.text = text; this.now = now; this.items = []; this.masks = {};
+    this.text = text; this.now = now; this.items = []; this.masks = {}; this.notes = [];
   }
   key(off) { return shiftKey(dkey(this.now), off); }
   mask(fam) { return (this.masks[fam] ||= new Uint8Array(this.text.length)); }
@@ -120,12 +122,81 @@ const HEAD_RE = new RegExp(`偏头痛|头痛|头疼|(?:头|脑袋|脑壳|脑仁|
 const PAINY = /疼|痛|胀|跳|酸|紧|压|难受|不舒服|炸|裂|晕|沉/;
 
 // 疼痛强度（文字说法，都算“猜测”）
+// 口语说法 → 大致分数（都算“猜测”，确认页显示原话，让用户再确认）
 const VAS_WORDS = [
-  [3, '有点疼|有点痛|有点头疼|有点头痛|有一点|一点点|轻微|轻度|隐隐|微微|稍微|不太疼|不太痛|不怎么疼|不怎么痛|还好|能忍|小疼|闷闷'],
-  [9, '疼死|痛死|要命|炸裂|裂开|爆炸|受不了|撞墙|最疼|最痛|从没这么|剧痛|疼哭|痛哭|疼得哭|打滚|动不了|起不来'],
+  [2, '一点点疼|一点点痛|微微疼|微微痛|几乎不疼|几乎不痛|不太明显|隐隐约约|轻轻的'],
+  [4, '有些疼|有些痛|有一些疼|一阵一阵|时不时疼|时不时痛|隐隐作痛'],
+  [3, '有点疼|有点痛|有点头疼|有点头痛|有一点|一点点|轻微|轻度|隐隐|微微|稍微|不太疼|不太痛|不怎么疼|不怎么痛|还好|能忍|小疼|闷闷|有点不舒服|有点难受'],
+  [10, '最疼的一次|这辈子最|从来没这么|从没这么|疼晕|痛晕|疼到晕'],
+  [9, '疼死|痛死|要命|炸裂|裂开|爆炸|受不了|撞墙|最疼|最痛|剧痛|疼哭|痛哭|疼得哭|打滚|动不了|起不来'],
+  [8, '疼得不行|痛得不行|特别严重|非常严重|超级严重|疼得冒汗|疼得想哭|痛得想哭|疼得发抖'],
+  [6, '比较严重|挺严重|很不舒服|疼得难受|痛得难受|疼得心烦|有点严重'],
   [7, '很疼|很痛|好疼|好痛|非常疼|非常痛|特别疼|特别痛|超疼|超痛|巨疼|巨痛|疼得厉害|痛得厉害|严重|重度|剧烈|十分疼|十分痛|厉害|难以忍受|没法上班|没法工作|疼醒|痛醒|疼得想吐|太疼|太痛|疼得睡不着|痛得睡不着'],
-  [5, '挺疼|挺痛|蛮疼|蛮痛|比较疼|比较痛|中度|还挺|有些疼|有些痛|影响(?:工作|上班|做事|学习)'],
+  [5, '挺疼|挺痛|蛮疼|蛮痛|比较疼|比较痛|中度|还挺|影响(?:工作|上班|做事|学习)|不太舒服|难受'],
 ];
+
+// 比较说法：“比昨天轻一点”“没有上次那么疼”“跟平时差不多”“比吃药前好点了”——用她自己的记录换算
+const CMP_REF = {
+  yesterday: '昨天|昨晚|昨儿', dayBefore: '前天', last: '上次|上一次|上回|之前那次|前一次|前几次|前几天', usual: '平时|往常|以往|平常|一般',
+  earlier: '吃药前|吃药之前|吃药以前|没吃药前|没吃药的时候|刚开始|一开始|刚才|早上|上午|中午|下午',
+};
+const REF_LABEL = { yesterday: '昨天', dayBefore: '前天', last: '上次', usual: '平时' };
+const REF_ALT = Object.values(CMP_REF).join('|');
+const refKind = w => Object.keys(CMP_REF).find(k => new RegExp(`^(?:${CMP_REF[k]})$`).test(w));
+const LIGHTER = '轻|好|缓解|减轻|弱|舒服|松', HEAVIER = '重|严重|厉害|疼|痛|难受|强|凶';
+function findComparisons(T) {
+  const out = [];
+  const push = (m, kind, delta) => out.push({ kind, delta, s: m.index, e: m.index + m[0].length, phrase: m[0].trim() });
+  const re1 = new RegExp(`(?:比起?|较)\\s*(${REF_ALT})(?:的时候|那次|那会儿?|那样)?\\s*(还|更|要|稍微|稍|略|明显|又)?\\s*(${LIGHTER}|${HEAVIER})了?\\s*(一点点|一点儿?|点儿?|一些|些|很多|好多|多了|不少|得多|多)?`, 'g');
+  for (const m of T.matchAll(re1)) {
+    const big = /很多|好多|多了|不少|得多|^多$/.test(m[4] || '') || m[2] === '明显';
+    push(m, refKind(m[1]), (new RegExp(`^(?:${LIGHTER})$`).test(m[3]) ? -1 : 1) * (big ? 2 : 1));
+  }
+  for (const m of T.matchAll(new RegExp(`(?:没有|没|不如|不像)\\s*(${REF_ALT})(?:的时候|那次|那会儿?)?\\s*(?:那么|那样|这么)\\s*(?:疼|痛|严重|厉害|难受)`, 'g'))) push(m, refKind(m[1]), -1);
+  for (const m of T.matchAll(new RegExp(`(?:跟|和|与|同|像)\\s*(${REF_ALT})(?:的时候|那次|那会儿?)?\\s*(?:差不多|一样|相当|类似|没什么区别|没啥区别)`, 'g'))) push(m, refKind(m[1]), 0);
+  return out.filter(x => x.kind).sort((a, b) => a.s - b.s);
+}
+// 参照的那次（或那些）头痛的分数；ctx.attacks 由 App 传入，按时间从新到旧
+function refVas(ctx, kind, aDate, today) {
+  const list = (ctx.attacks || []).filter(a => a.vas > 0);
+  if (kind === 'yesterday' || kind === 'dayBefore') {
+    // “昨天 / 前天”按说话的今天算
+    const k = shiftKey(today, kind === 'yesterday' ? -1 : -2), vs = list.filter(a => a.day === k).map(a => a.vas);
+    return vs.length ? { v: Math.max(...vs), label: REF_LABEL[kind] } : null;
+  }
+  if (kind === 'last') {
+    const a = list.find(x => x.day < aDate);
+    return a ? { v: a.vas, label: `${md(a.day)}那次` } : null;
+  }
+  if (kind === 'usual') {
+    const from = shiftKey(aDate, -90), vs = list.filter(a => a.day < aDate && a.day >= from).map(a => a.vas).sort((x, y) => x - y);
+    return vs.length >= 3 ? { v: vs[Math.floor(vs.length / 2)], label: '平时' } : null;
+  }
+  return null;
+}
+// 和别的时候比：算出大致分数；参照的那天没有记录就提示用户自己选
+function vasFromComparison(R, ctx, c, aDate) {
+  const ref = refVas(ctx, c.kind, aDate, R.key(0));
+  if (!ref) {
+    R.notes.push(`说了「${c.phrase}」，但${REF_LABEL[c.kind]}没有可以对照的头痛记录，没法换算，下一步拖动滑块选一下。`);
+    return null;
+  }
+  const v = Math.max(1, Math.min(10, Math.round(ref.v + c.delta)));
+  return { v, fuzzy: true, span: c.s != null ? [c.s, c.e] : null, cmp: `${c.phrase}，${ref.label} ${ref.v} 分` };
+}
+// “比吃药前好点了”：说的是这次吃药的效果，不是新的分数
+function applyEarlier(R, ctx, c, aDate) {
+  const effect = c.delta < 0 ? 1 : 0;
+  const meds = R.items.filter(x => x.k === 'med' && x.g === 'a');
+  if (meds.length) {
+    const m = meds[meds.length - 1];
+    if (m.v.effect == null) { m.v.effect = effect; if (c.s != null) m.spans.push([c.s, c.e]); }
+    return;
+  }
+  const hadMeds = (ctx.attacks || []).some(a => a.day === aDate && a.meds > 0);
+  if (hadMeds) R.add('a', 'medeffect', effect, { fuzzy: true, span: c.s != null ? [c.s, c.e] : null }).phrase = c.phrase;
+  else R.notes.push(`说了「${c.phrase}」，但没找到这次吃的药；保存前可以在服药记录里选效果。`);
+}
 
 const REGION_SYN = [
   [['vertex'], '头顶|天灵盖|颅顶'],
@@ -374,6 +445,7 @@ export function parseText(text, ctx = {}) {
   const T = text;
 
   // ---- 头痛：有没有 ----
+  let earlier = null;
   const heads = [];
   let negHead = null, mild = false;
   for (const [s, e, m] of scan(R, 'head', HEAD_RE)) {
@@ -439,18 +511,25 @@ export function parseText(text, ctx = {}) {
       const v = cnNum(m[1]);
       if (v != null && v <= 10) vas = { v: Math.round(v), fuzzy: false, span: [s, e] };
     }
-    if (!vas) {
+    // 和别的时候比：没说具体分数时，用参照那次的分数加减
+    const aDate = R.key(aOff), cmps = findComparisons(T);
+    for (const c of cmps) {
+      if (c.kind === 'earlier') { earlier ||= c; continue; }
+      if (vas && !vas.fuzzy) continue;
+      vas = vasFromComparison(R, ctx, c, aDate) || vas;
+    }
+    if (!vas && !R.notes.length) {
       let best = null;
       for (const [lvl, re] of VAS_WORDS) {
         for (const [s, e] of scan(R, 'vasw', re)) {
           if (!inPain(s)) continue;
-          if (!best || lvl > best.v) best = { v: lvl, fuzzy: true, span: [s, e] };
+          if (!best || lvl > best.v) best = { v: lvl, fuzzy: true, span: [s, e], phrase: T.slice(s, e) };
         }
       }
-      if (!best && mild) best = { v: 3, fuzzy: true, span: [heads[0].s, heads[0].e] };
+      if (!best && mild) best = { v: 3, fuzzy: true, span: [heads[0].s, heads[0].e], phrase: T.slice(heads[0].s, heads[0].e) };
       vas = best;
     }
-    if (vas) R.add('a', 'vas', Math.max(1, vas.v), { fuzzy: vas.fuzzy, span: vas.span });
+    if (vas) Object.assign(R.add('a', 'vas', Math.max(1, vas.v), { fuzzy: vas.fuzzy, span: vas.span }), { phrase: vas.phrase, cmp: vas.cmp });
 
     // ---- 部位 ----
     for (const c of cls) {
@@ -497,7 +576,8 @@ export function parseText(text, ctx = {}) {
     }
 
     // ---- 持续时间 ----
-    const ongoing = T.match(/还在(?:疼|痛)|现在还|到现在|还没好|仍然(?:疼|痛)|还疼|还痛|还有点(?:疼|痛)|一直没好|持续中/);
+    // “比昨天还疼”是在比较，不算“还在疼”
+    const ongoing = [...T.matchAll(/还在(?:疼|痛)|现在还|到现在|还没好|仍然(?:疼|痛)|还疼|还痛|还有点(?:疼|痛)|一直没好|持续中/g)].find(m => !cmps.some(c => m.index >= c.s && m.index < c.e));
     if (ongoing) R.add('a', 'duration', 'ongoing', { span: [ongoing.index, ongoing.index + ongoing[0].length] });
     else {
       const hm = new RegExp(`(?:疼|痛|持续|难受|发作)了?\\s*(?:大概|差不多|将近|快|约|整整)?\\s*(${N})\\s*个?\\s*(半)?\\s*(多)?\\s*(小时|钟头)`).exec(T);
@@ -528,6 +608,7 @@ export function parseText(text, ctx = {}) {
 
   // ---- 药 ----
   parseMeds(R, cls, ctx, hasAttack, headClauses);
+  if (hasAttack && earlier) applyEarlier(R, ctx, earlier, R.key(aOff));
 
   // ---- 睡眠 ----
   parseSleep(R, cls);
@@ -837,8 +918,15 @@ export function fromAI(J, text, ctx = {}) {
       const d = new Date(now); d.setDate(d.getDate() + off);
       R.add('a', 'start', `${dkey(d)}T${hhmm(d)}`, { fuzzy: true }).noTime = true;
     }
+    const aDate = R.key(off);
+    const kind = { yesterday: 'yesterday', day_before: 'dayBefore', last: 'last', usual: 'usual', before_meds: 'earlier' }[H.vas_comparison?.reference];
+    const delta = Math.max(-3, Math.min(3, Math.round(+H.vas_comparison?.change || 0)));
+    const phrase = typeof H.vas_phrase === 'string' ? H.vas_phrase.trim().slice(0, 24) : '';
     const vas = Math.round(+H.vas);
-    if (vas >= 1 && vas <= 10) R.add('a', 'vas', vas, { fuzzy: unsure.has('vas') });
+    let cv = null;
+    if (kind && kind !== 'earlier' && !(vas >= 1 && vas <= 10 && !unsure.has('vas'))) cv = vasFromComparison(R, ctx, { kind, delta, phrase: phrase || `比${REF_LABEL[kind]}${delta < 0 ? '轻' : delta > 0 ? '重' : '差不多'}` }, aDate);
+    if (cv) Object.assign(R.add('a', 'vas', cv.v, { fuzzy: true }), { cmp: cv.cmp });
+    else if (vas >= 1 && vas <= 10) Object.assign(R.add('a', 'vas', vas, { fuzzy: unsure.has('vas') || !!phrase }), { phrase });
     const regions = (H.regions || []).filter(r => REGION_IDS.includes(r));
     if (regions.length) R.add('a', 'region', regions, { fuzzy: unsure.has('regions') });
     for (const q of H.qualities || []) if (pickIn(QUALITIES, q)) R.add('a', 'quality', q, { fuzzy: unsure.has('qualities') });
@@ -857,6 +945,9 @@ export function fromAI(J, text, ctx = {}) {
       name: p ? p.name : canon.slice(0, 20), dose: (typeof m.dose === 'string' && m.dose.trim()) || p?.dose || '', kind: p?.kind || 'acute',
       time, effect, relief: effect > 0 && +m.relief_hours > 0 ? nearestRelief(+m.relief_hours) : null, generic: false,
     }, { date: hasAttack ? null : R.key(0), fuzzy: unsure.has('meds') });
+  }
+  if (hasAttack && H.vas_comparison?.reference === 'before_meds') {
+    applyEarlier(R, ctx, { delta: Math.round(+H.vas_comparison.change || 0), phrase: (typeof H.vas_phrase === 'string' && H.vas_phrase.trim()) || '比吃药前' }, R.key(Math.max(-7, Math.min(0, Math.round(+H.start_day_offset || 0)))));
   }
   if (!hasAttack && J.no_headache_today) R.add('d', 'nopain', true, { date: R.key(0) });
 
@@ -902,7 +993,8 @@ export function itemText(it) {
   const v = it.v;
   switch (it.k) {
     case 'start': { const [d, t] = v.split('T'); return it.noTime ? `${dayWord(d)}（几点没说）` : `${dayWord(d)} ${t} 开始`; }
-    case 'vas': return `疼痛 ${v}/10`;
+    case 'vas': return it.cmp ? `疼痛约 ${v}/10 · ${it.cmp}` : it.phrase ? `疼痛约 ${v}/10 · “${it.phrase}”` : `疼痛 ${v}/10`;
+    case 'medeffect': return `药效：${EFFECTS[v].label}${it.phrase ? `（${it.phrase}）` : ''}`;
     case 'region': return v.length === REGION_IDS.length ? '整个头部' : v.map(id => REGIONS[id].label).join('、');
     case 'duration': return v === 'ongoing' ? '还在持续' : `持续 ${DURATIONS.find(d => d.k === v).label}`;
     case 'med': return [`${v.name}${v.dose ? ' ' + v.dose : ''}`, v.time, v.effect != null ? EFFECTS[v.effect].label : '', v.relief ? `${v.relief < 1 ? '半小时' : v.relief + ' 小时'}起效` : ''].filter(Boolean).join(' · ');

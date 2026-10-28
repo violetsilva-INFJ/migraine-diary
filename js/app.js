@@ -139,7 +139,7 @@ const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platfor
 const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
 // ======================= 渲染 =======================
-const TABS = [['home', '今日', 'home'], ['records', '手记', 'list'], ['analysis', '洞察', 'chart'], ['me', '我的', 'user']];
+const TABS = [['home', '今日', 'sunrise'], ['records', '手记', 'book'], ['analysis', '洞察', 'eye'], ['me', '我的', 'user']];
 
 function render() {
   const views = { home: viewHome, records: viewRecords, analysis: viewAnalysis, me: viewMe };
@@ -149,7 +149,7 @@ function render() {
   $app.innerHTML = `
     <main class="view v-${ui.tab} ${anim ? 'anim' : ''}">${views[ui.tab]()}</main>
     <nav class="tabbar" aria-label="主导航">
-      ${TABS.map(([k, label, ic]) => `<button class="tab ${ui.tab === k ? 'on' : ''} ${ui.tab === k && anim ? 'just' : ''}" data-act="tab" data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${icon(ic, 23, ui.tab === k ? 2.1 : 1.8)}<span>${label}</span></button>`).join('')}
+      ${TABS.map(([k, label, ic]) => `<button class="tab ${ui.tab === k ? 'on' : ''} ${ui.tab === k && anim ? 'just' : ''}" data-act="tab" data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${icon(ic, 23, 1.8)}<span>${label}</span></button>`).join('')}
     </nav>`;
   ui.heroEnter = false;
   bindTrend();
@@ -195,10 +195,10 @@ const header = (eyebrow, title, right = '') => `<header class="top"><div><div cl
 // 小记的六个格子：文艺的名字 + 旁边小字写明是什么
 const TILES = [
   { k: 'period', label: '月汐', plain: '经期', ic: 'drop', color: 'var(--t-period)' },
-  { k: 'diet', label: '食光', plain: '饮食', ic: 'utensils', color: 'var(--t-diet)' },
-  { k: 'sleep', label: '入梦', plain: '睡眠', ic: 'moon', color: 'var(--t-sleep)' },
-  { k: 'mood', label: '心晴', plain: '心情', ic: 'smile', color: 'var(--t-stress)' },
-  { k: 'exercise', label: '舒展', plain: '运动', ic: 'dumbbell', color: 'var(--t-exercise)' },
+  { k: 'diet', label: '食光', plain: '饮食', ic: 'bowl', color: 'var(--t-diet)' },
+  { k: 'sleep', label: '入梦', plain: '睡眠', ic: 'sleep', color: 'var(--t-sleep)' },
+  { k: 'mood', label: '心晴', plain: '心情', ic: 'heart', color: 'var(--t-stress)' },
+  { k: 'exercise', label: '舒展', plain: '运动', ic: 'stretch', color: 'var(--t-exercise)' },
   { k: 'meds', label: '药笺', plain: '服药', ic: 'pill', color: 'var(--t-meds)' },
 ];
 
@@ -212,7 +212,7 @@ function tileValue(k, date) {
       const foods = d.foods || [];
       if (!d.meals && d.caffeine == null && d.alcohol == null && !foods.length) return [false, '未记录'];
       const parts = [];
-      if (d.meals) parts.push(`${MEALS.filter(([m]) => d.meals[m]).length} 餐`);
+      if (d.meals) { const n = MEALS.filter(([m]) => d.meals[m]).length; parts.push(n ? `${n} 餐` : '漏餐'); }
       if (foods.length) parts.push(foods.length === 1 ? foods[0].item : `${foods.length} 样`);
       else if (S.caffeineOf(d)) parts.push(`咖啡因 ${S.caffeineOf(d)}`);
       if (!parts.length && S.alcoholOf(d)) parts.push('饮酒');
@@ -265,7 +265,7 @@ function heroCard() {
     ? `<div class="risk">${icon('alert', 18)}<span>根据今天的打卡，发作风险比平时高（约 ${pct(A.forecast.p)}），可以早点休息、把药带在身边。</span></div>` : '';
   return `<section class="${cls}">
     <div class="label">今日天色</div><h2>今天，头还好吗？</h2><p>每天落一笔，规律会像画一样慢慢浮现</p>
-    <div class="actions"><button class="hbtn" data-act="no-pain">${icon('check', 18, 2.2)}晴，没有头痛</button>
+    <div class="actions"><button class="hbtn" data-act="no-pain">${icon('sun', 18, 2)}晴，没有头痛</button>
       <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}记下头痛</button></div>
     ${risk}
   </section>`;
@@ -292,7 +292,7 @@ function viewHome() {
   const done = TILES.filter(t => tileValue(t.k, tk)[0]).length;
   return `
   ${header(`${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`, `${greet}${name ? '，' + esc(name) : ''}`,
-    `<div class="top-actions">${streak >= 2 ? `<span class="streak">${icon('flame', 15, 2)}${streak} 天</span>` : ''}
+    `<div class="top-actions">${streak >= 2 ? `<span class="streak">${icon('sun', 15, 2)}${streak} 天</span>` : ''}
       <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}
   ${installBanner()}
   ${heroCard()}
@@ -305,7 +305,7 @@ function viewHome() {
     ${TILES.map(t => {
       const [ok, text] = tileValue(t.k, tk);
       return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.plain}：${esc(text)}">
-        <span class="gl" style="--c:${t.color}">${icon(t.ic, 20, 2.1)}</span><b>${t.label}<small>${t.plain}</small></b><span class="val">${esc(text)}</span>
+        <span class="gl" style="--c:${t.color}">${icon(t.ic, 22, 1.8)}</span><b>${t.label}<small>${t.plain}</small></b><span class="val">${esc(text)}</span>
         ${ok ? `<i class="tick">${icon('check', 12, 3.2)}</i>` : ''}</button>`;
     }).join('')}
   </div>
@@ -446,7 +446,7 @@ function viewAnalysis() {
   const all = state.attacks;
 
   return `
-  ${header('晴雨手记', '洞察', `<div class="month-nav">
+  ${header('头痛晴雨表', '洞察', `<div class="month-nav">
       <button class="icon-btn" data-act="month" data-d="-1" aria-label="上个月">${icon('chevL', 20)}</button>
       <span>${m0.getFullYear()}年${m0.getMonth() + 1}月</span>
       <button class="icon-btn" data-act="month" data-d="1" aria-label="下个月" ${isCur ? 'disabled' : ''}>${icon('chevR', 20)}</button></div>`)}
@@ -853,7 +853,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 晴雨手记 v1.6</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛晴雨表 v1.6.1</div></div></div>
   </div>`;
 }
 
@@ -959,8 +959,12 @@ const SHEETS = {
 // ======================= 一句话记录：确认页 =======================
 const Q_TILE = { period: ['period'], diet: ['meal', 'food'], sleep: ['sleep'], mood: ['valence', 'feel', 'factor'], exercise: ['ex', 'exmin', 'exint', 'noex'], meds: ['med'] };
 const Q_STEP = { vas: [1, 1, 10], sleep: [0.5, 0, 16], exmin: [5, 5, 600], valence: [1, 1, 7] };
-const A_ORDER = ['start', 'vas', 'region', 'quality', 'symptom', 'duration', 'trigger', 'med', 'note'];
-const qctx = () => ({ now: new Date(), meds: state.settings.meds, customTriggers: state.settings.customTriggers });
+const A_ORDER = ['start', 'vas', 'region', 'quality', 'symptom', 'duration', 'trigger', 'med', 'medeffect', 'note'];
+// 识别时的参照：常用药、自定义诱因，以及以往头痛的日期和分数（用来换算“比昨天轻一点”；只在手机上用，不发给 AI）
+const qctx = () => ({
+  now: new Date(), meds: state.settings.meds, customTriggers: state.settings.customTriggers,
+  attacks: state.attacks.map(a => ({ day: S.attackDay(a), vas: vasOf(a), meds: (a.meds || []).length })),
+});
 
 function qChip(s, it) {
   const i = s.res.items.indexOf(it), cls = `chip qi ${it.on ? 'on' : ''} ${it.fuzzy ? 'fuzzy' : ''}`;
@@ -1018,13 +1022,15 @@ function quickBody(s) {
     const generic = A.filter(x => x.k === 'med' && x.on && x.v.generic);
     const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
     html += `<section class="card q-sec ${s.attackOn ? '' : 'off'}">
-      <div class="q-h"><span class="gl" style="--c:var(--pain)">${icon('bolt', 15, 2.2)}</span><b>一次头痛</b><small>${dayWord(aDate)}</small>
+      <div class="q-h"><span class="gl" style="--c:var(--pain)">${icon('cloud', 16, 1.9)}</span><b>一次头痛</b><small>${dayWord(aDate)}</small>
         <button class="switch ${s.attackOn ? 'on' : ''}" role="switch" aria-checked="${s.attackOn}" data-act="q-attack" aria-label="记录这次头痛"></button></div>
       ${!s.attackOn ? '<p class="note" style="margin:0">这次不记头痛，只保存下面的小记。</p>' : `
       ${ex.length ? `<div class="seg-ctl q-attach"><button class="${!s.attachTo ? 'on' : ''}" data-act="q-attach" data-v="">记为新的一次</button><button class="${s.attachTo === ex[0].id ? 'on' : ''}" data-act="q-attach" data-v="${ex[0].id}">补充到 ${hhmm(new Date(ex[0].start))} 那次</button></div>` : ''}
       <div class="chips">${A_ORDER.flatMap(k => A.filter(x => x.k === k)).map(it => qChip(s, it)).join('')}</div>
       ${generic.map(it => `<div class="q-sub"><span>没听清是哪种药，选一下：</span><div class="chips">${presets.map(p => `<button class="chip mini ${it.v.name === p.name ? 'on' : ''}" data-act="qi-med" data-i="${items.indexOf(it)}" data-name="${esc(p.name)}" data-dose="${esc(p.dose)}" data-kind="${p.kind}">${esc(p.name)}</button>`).join('')}</div></div>`).join('')}
-      ${!A.some(x => x.k === 'vas') && !s.attachTo ? '<p class="note">没听出疼痛强度，下一步拖动滑块选一下。</p>' : ''}`}
+      ${(s.res.notes || []).map(n => `<p class="note">${esc(n)}</p>`).join('')}
+      ${!A.some(x => x.k === 'vas') && !s.attachTo && !(s.res.notes || []).length ? '<p class="note">没听出疼痛强度，下一步拖动滑块选一下。</p>' : ''}
+      ${A.some(x => x.k === 'vas' && (x.phrase || x.cmp)) ? '<p class="note">分数是按你的说法估的：有点疼≈3，比较痛≈5，很疼≈7，疼得受不了≈9；和别的时候比的，按那次记录加减。用 − / + 调到合适的分数。</p>' : ''}`}
     </section>`;
   }
   for (const d of days) {
@@ -1125,6 +1131,12 @@ function applyQuick() {
       case 'trigger': add(d.triggers, v); break;
       case 'duration': d.duration = v; break;
       case 'med': d.meds.push({ id: uid(), name: v.name, dose: v.dose || '', time: v.time || (sameDay ? hhmm(new Date()) : hhmm(start)), effect: v.effect ?? null, relief: v.relief ?? null }); break;
+      case 'medeffect': {
+        // “比吃药前好点了”：记到这次头痛里最近吃的那种药上
+        const m = [...d.meds].reverse().find(x => x.effect == null) || d.meds[d.meds.length - 1];
+        if (m) { m.effect = v; if (!(v > 0)) m.relief = null; }
+        break;
+      }
       case 'note': d.note = d.note ? `${d.note}\n${v}` : v; break;
     }
   }
@@ -1523,7 +1535,7 @@ function buildReport() {
     lines.push(`${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)} 强度${vasOf(a)} ${a.duration ? durationOf(a.duration).label : ''} ${regionSummary(a)} ${(a.qualities || []).join('、')} ${(a.symptoms || []).join('、')}${meds ? ' | ' + meds : ''}`.replace(/\s+/g, ' ').trim());
   }
   if (!list.length) lines.push('（无）');
-  lines.push('', '由「晴雨手记」生成，仅供参考。');
+  lines.push('', '由「头痛晴雨表」生成，仅供参考。');
   return lines.join('\n');
 }
 
@@ -1562,18 +1574,18 @@ function exportCSV() {
         (a.qualities || []).join('/'), (a.symptoms || []).join('/'), (a.triggers || []).join('/'), meds, ...daily, a.note].map(q).join(','));
     }
   }
-  shareOrDownload(`晴雨手记-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
+  shareOrDownload(`头痛晴雨表-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
 }
 
 function exportJSON() {
   const data = { app: 'migraine-diary', version: 2, exportedAt: new Date().toISOString(), attacks: state.attacks, days: Object.values(state.days), settings: state.settings };
-  shareOrDownload(`晴雨手记备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
+  shareOrDownload(`头痛晴雨表备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
 }
 
 async function importJSON(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { return toast('文件格式不对，无法读取'); }
-  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是晴雨手记的备份文件');
+  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是头痛晴雨表的备份文件');
   const attacks = data.attacks.filter(a => a && a.id && a.start && (a.vas || a.severity)).map(normalizeAttack);
   const days = data.days.filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d.date));
   if (!confirm(`将导入 ${attacks.length} 次头痛、${days.length} 天打卡，并与现有记录合并（相同的记录以备份为准）。继续吗？`)) return;
