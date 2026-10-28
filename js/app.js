@@ -446,7 +446,7 @@ function viewAnalysis() {
   const all = state.attacks;
 
   return `
-  ${header('头痛晴雨表', '洞察', `<div class="month-nav">
+  ${header('偏晴 · 偏头痛日记', '洞察', `<div class="month-nav">
       <button class="icon-btn" data-act="month" data-d="-1" aria-label="上个月">${icon('chevL', 20)}</button>
       <span>${m0.getFullYear()}年${m0.getMonth() + 1}月</span>
       <button class="icon-btn" data-act="month" data-d="1" aria-label="下个月" ${isCur ? 'disabled' : ''}>${icon('chevR', 20)}</button></div>`)}
@@ -853,7 +853,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛晴雨表 v1.6.1</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.6.2</div></div></div>
   </div>`;
 }
 
@@ -1535,7 +1535,7 @@ function buildReport() {
     lines.push(`${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)} 强度${vasOf(a)} ${a.duration ? durationOf(a.duration).label : ''} ${regionSummary(a)} ${(a.qualities || []).join('、')} ${(a.symptoms || []).join('、')}${meds ? ' | ' + meds : ''}`.replace(/\s+/g, ' ').trim());
   }
   if (!list.length) lines.push('（无）');
-  lines.push('', '由「头痛晴雨表」生成，仅供参考。');
+  lines.push('', '由「偏晴 · 偏头痛日记」生成，仅供参考。');
   return lines.join('\n');
 }
 
@@ -1574,18 +1574,18 @@ function exportCSV() {
         (a.qualities || []).join('/'), (a.symptoms || []).join('/'), (a.triggers || []).join('/'), meds, ...daily, a.note].map(q).join(','));
     }
   }
-  shareOrDownload(`头痛晴雨表-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
+  shareOrDownload(`偏晴-偏头痛日记-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
 }
 
 function exportJSON() {
   const data = { app: 'migraine-diary', version: 2, exportedAt: new Date().toISOString(), attacks: state.attacks, days: Object.values(state.days), settings: state.settings };
-  shareOrDownload(`头痛晴雨表备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
+  shareOrDownload(`偏晴备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
 }
 
 async function importJSON(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { return toast('文件格式不对，无法读取'); }
-  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是头痛晴雨表的备份文件');
+  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是偏晴的备份文件');
   const attacks = data.attacks.filter(a => a && a.id && a.start && (a.vas || a.severity)).map(normalizeAttack);
   const days = data.days.filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d.date));
   if (!confirm(`将导入 ${attacks.length} 次头痛、${days.length} 天打卡，并与现有记录合并（相同的记录以备份为准）。继续吗？`)) return;

@@ -1,6 +1,6 @@
 {
-  "name": "头痛晴雨表",
-  "short_name": "头痛晴雨表",
+  "name": "偏晴 · 偏头痛日记",
+  "short_name": "偏晴",
   "description": "记录偏头痛发作、用药与生活习惯，数据只保存在本机。",
   "lang": "zh-CN",
   "start_url": "./",
