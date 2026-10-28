@@ -98,6 +98,66 @@ export const EFFECTS = [
 ];
 export const RELIEF = [0.5, 1, 2, 3, 4];
 export const STRESS = { 1: '低', 2: '中等', 3: '高' };
+
+// 心理状态（参考 iOS「健康」的心情记录：7 级愉快程度 + 感受 + 影响因素）
+export const MOOD = ['非常不愉快', '不愉快', '有点不愉快', '一般', '有点愉快', '愉快', '非常愉快'];
+export const MOOD_SHORT = ['很糟', '不太好', '有点低落', '一般', '还不错', '愉快', '很棒'];
+export const FEELINGS_NEG = ['焦虑', '有压力', '担心', '烦躁', '难过', '沮丧', '疲惫', '孤独', '不知所措'];
+export const FEELINGS_POS = ['平静', '放松', '满足', '开心', '感恩', '有希望', '自信', '兴奋'];
+export const MOOD_FACTORS = ['工作', '学习', '家庭', '伴侣', '朋友', '健康', '睡眠', '天气', '金钱', '时事', '自我照顾'];
+// 由心情推算压力等级（兼容旧版只记了“压力 低/中/高”的数据）
+export const stressOf = d => {
+  if (!d) return null;
+  if (d.mood) {
+    const f = d.mood.feelings || [];
+    if (f.includes('有压力') || f.includes('焦虑') || f.includes('不知所措')) return 3;
+    if (d.mood.valence != null) return d.mood.valence <= 3 ? 2 : 1;
+  }
+  return d.stress ?? null;
+};
+
+// 饮食与运动：先选大类，再选具体项目，可以补充说明；也能直接填写（归入“未分类”，之后可以再分类）
+export const UNCAT = '未分类';
+export const FOOD_CATALOG = [
+  { cat: '饮品', items: ['咖啡', '奶茶', '浓茶', '碳酸饮料', '能量饮料', '果汁', '代糖饮料'] },
+  { cat: '酒类', items: ['红酒', '啤酒', '白酒', '洋酒 / 鸡尾酒'] },
+  { cat: '甜食零食', items: ['巧克力', '蛋糕甜点', '冰淇淋 / 冷饮', '糖果', '薯片 / 膨化'] },
+  { cat: '乳制品', items: ['奶酪', '牛奶', '酸奶'] },
+  { cat: '肉类', items: ['腌制 / 加工肉', '红肉', '禽肉', '海鲜'] },
+  { cat: '水果', items: ['柑橘类', '香蕉', '其他水果'] },
+  { cat: '调味加工', items: ['味精 / 鸡精', '方便速食', '腌菜 / 发酵食品', '辛辣'] },
+  { cat: '主食', items: ['米饭', '面食', '面包', '粥'] },
+];
+export const EXERCISE_CATALOG = [
+  { cat: '有氧', items: ['散步', '跑步', '骑行', '游泳', '跳绳', '爬山 / 爬楼'] },
+  { cat: '力量', items: ['器械训练', '自重训练'] },
+  { cat: '身心', items: ['瑜伽', '普拉提', '拉伸', '太极'] },
+  { cat: '球类', items: ['羽毛球', '乒乓球', '篮球', '网球', '足球'] },
+  { cat: '其他运动', items: ['舞蹈', '家务 / 体力活'] },
+];
+export const INTENSITY = { 1: '轻松', 2: '适中', 3: '剧烈' };
+// 常被提到的偏头痛相关食物（模型里的“常见诱发食物”；咖啡因和酒已单独分析，不重复计入）
+export const TRIGGER_FOODS = ['代糖饮料', '巧克力', '奶酪', '腌制 / 加工肉', '柑橘类', '味精 / 鸡精', '腌菜 / 发酵食品'];
+
+// GAD-7 / PHQ-9（过去两周），选项计 0–3 分
+export const SCALE_OPTIONS = ['完全不会', '好几天', '一半以上的天数', '几乎每天'];
+export const SCALES = {
+  gad7: {
+    name: 'GAD-7', title: '焦虑自评', minutes: 1,
+    items: ['感觉紧张、焦虑或急切', '不能够停止或控制担忧', '对各种各样的事情担忧过多', '很难放松下来',
+      '由于不安而无法静坐', '变得容易烦恼或急躁', '感到似乎将有可怕的事情发生而害怕'],
+    bands: [[4, '基本没有焦虑'], [9, '轻度焦虑'], [14, '中度焦虑'], [21, '重度焦虑']],
+  },
+  phq9: {
+    name: 'PHQ-9', title: '抑郁自评', minutes: 2,
+    items: ['做事时提不起劲或没有兴趣', '感到心情低落、沮丧或绝望', '入睡困难、睡不安稳或睡眠过多', '感觉疲倦或没有活力',
+      '食欲不振或吃太多', '觉得自己很糟，或觉得自己很失败，或让自己或家人失望', '对事物专注有困难，例如阅读或看电视时',
+      '动作或说话速度缓慢到别人已经察觉，或正好相反——烦躁、坐立不安，动来动去的情况比平常更多', '有不如死掉或用某种方式伤害自己的念头'],
+    bands: [[4, '基本没有抑郁'], [9, '轻度抑郁'], [14, '中度抑郁'], [19, '中重度抑郁'], [27, '重度抑郁']],
+  },
+};
+export const scaleBand = (key, score) => SCALES[key].bands.find(([max]) => score <= max)[1];
+export const scaleLevel = score => score <= 4 ? 0 : score <= 9 ? 1 : score <= 14 ? 2 : 3;
 export const MEALS = [['b', '早餐'], ['l', '午餐'], ['d', '晚餐']];
 export const DEFAULT_MEDS = [
   { name: '布洛芬', dose: '400mg', kind: 'acute' },
@@ -139,6 +199,9 @@ const P = {
   checkCircle: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>',
   bolt: '<path d="M13 3.5 5.5 13.5h6l-1 7 7.5-10h-6z"/>',
   chevD: '<path d="m6 9.5 6 6 6-6"/>',
+  smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2c1.8 2.2 5 2.2 6.8 0"/><path d="M9.3 9.6v.6M14.7 9.6v.6"/>',
+  clipboard: '<rect x="5.5" y="4.5" width="13" height="16" rx="2.5"/><path d="M9.5 4.5V3.6c0-.6.4-1.1 1-1.1h3c.6 0 1 .5 1 1.1v.9M9 10h6M9 13.5h6M9 17h3.5"/>',
+  phone: '<path d="M6.5 3.5h3l1.5 4-2 1.3a10 10 0 0 0 5.2 5.2l1.3-2 4 1.5v3a2 2 0 0 1-2.2 2A15.8 15.8 0 0 1 4.5 5.7a2 2 0 0 1 2-2.2z"/>',
 };
 export const icon = (name, size = 22, sw = 1.8) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;

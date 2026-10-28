@@ -11,8 +11,11 @@
 // 8. 疼痛强度（VAS 0–10）：只看发作日，用贝叶斯线性回归（正态先验，误差方差用 EM 估计）
 //    看哪些因素让疼痛更重。部位、性质属于“发作表现”而非原因，类别多、样本少，
 //    用描述统计（热力图、占比、各性质平均强度）更稳妥，不做多项回归。
+// 9. 饮食 / 运动：记录按“大类 → 具体项目”存，可以按任一大类或项目做单因素分析
+//    （饮食看当天或前一天，运动看当天），自由填写的条目归入“未分类”，分类后才进分析。
+// 10. 心理状态：心情（7 级愉快度）进入模型（情绪低落、压力），GAD-7 / PHQ-9 只做描述，不当作每日因素。
 
-import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth, vasOf, laterality, REGION_IDS } from './util.js';
+import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth, vasOf, laterality, REGION_IDS, stressOf, TRIGGER_FOODS, UNCAT } from './util.js';
 
 export const MIN_DAYS = 21;
 export const MIN_ATTACKS = 4;
@@ -35,8 +38,11 @@ export function indexAttacks(attacks) {
 export function hasDayData(d) {
   if (!d) return false;
   return d.pain === 0 || d.period != null || d.meals != null || d.caffeine != null || d.alcohol != null ||
-    d.sleep != null || d.stress != null || d.exercise != null || (d.meds && d.meds.length > 0);
+    d.sleep != null || d.stress != null || d.mood != null || d.exercise != null || d.exIntensity != null ||
+    (d.meds && d.meds.length > 0) || (d.foods && d.foods.length > 0) || (d.workouts && d.workouts.length > 0);
 }
+// 需要保存的打卡（量表结果不算“每日打卡”，但也要保存）
+export const keepDay = d => hasDayData(d) || !!(d && (d.gad7 || d.phq9));
 
 export function normCdf(z) {
   const t = 1 / (1 + 0.2316419 * Math.abs(z));
@@ -180,10 +186,12 @@ export const FEATURES = [
     get: d => d?.sleep == null ? null : +(d.sleep < 6) },
   { key: 'sleepLong', label: '睡得太久', desc: '前一晚睡了 9 小时或更久',
     get: d => d?.sleep == null ? null : +(d.sleep >= 9) },
-  { key: 'stressHigh', label: '压力大', desc: '当天压力为「高」',
-    get: d => d?.stress == null ? null : +(d.stress === 3) },
+  { key: 'stressHigh', label: '压力大', desc: '当天压力大或焦虑（来自心情记录）',
+    get: d => stressOf(d) == null ? null : +(stressOf(d) === 3) },
+  { key: 'moodLow', label: '情绪低落', desc: '当天心情为「有点不愉快」或更差',
+    get: d => d?.mood?.valence != null ? +(d.mood.valence <= 3) : null },
   { key: 'stressDrop', label: '压力骤降', desc: '压力比前一天低（“放松后头痛”）',
-    get: (d, prev) => (d?.stress == null || prev?.stress == null) ? null : +(prev.stress - d.stress >= 1) },
+    get: (d, prev) => (stressOf(d) == null || stressOf(prev) == null) ? null : +(stressOf(prev) - stressOf(d) >= 1) },
   { key: 'mealSkip', label: '漏餐', desc: '当天至少有一餐没吃',
     get: d => !d?.meals ? null : +(['b', 'l', 'd'].some(m => d.meals[m] === false)) },
   { key: 'caffeineHigh', label: '咖啡因偏多', desc: '咖啡或浓茶 3 杯及以上',
@@ -194,6 +202,14 @@ export const FEATURES = [
     get: (d, prev, ctx) => ctx.known ? +ctx.inWindow : null },
   { key: 'exercise', label: '运动', desc: '当天运动 20 分钟以上',
     get: d => d?.exercise == null ? null : +(d.exercise >= 20) },
+  { key: 'hardExercise', label: '剧烈运动', desc: '当天运动强度为「剧烈」',
+    get: d => d?.exIntensity == null ? null : +(d.exIntensity === 3) },
+  { key: 'foodTrigger', label: '常见诱发食物', desc: '当天或前一天吃过巧克力、奶酪、加工肉、味精、柑橘、代糖饮料等',
+    get: (d, prev) => {
+      const logged = x => x && (x.meals || (x.foods && x.foods.length));
+      if (!logged(d) && !logged(prev)) return null;
+      return +[d, prev].some(x => (x?.foods || []).some(f => TRIGGER_FOODS.includes(f.item)));
+    } },
 ];
 export const featureByKey = k => FEATURES.find(f => f.key === k);
 
@@ -220,6 +236,7 @@ export function buildRows(state, { endKey = todayKey(), lookback = 365 } = {}) {
     if (!atks.length && prevAtks.some(a => a.duration === 'gt24')) continue;
     rows.push({
       key: k,
+      prev: state.days[shiftKey(k, -1)],
       y: atks.length ? 1 : 0,
       vas: atks.reduce((m, a) => Math.max(m, vasOf(a)), 0),
       day,
@@ -334,7 +351,8 @@ function pearson(x, y) {
 
 export const CORR_VARS = [
   { key: 'sleep', label: '睡眠时长', get: d => d?.sleep },
-  { key: 'stress', label: '压力', get: d => d?.stress },
+  { key: 'mood', label: '心情', get: d => d?.mood?.valence },
+  { key: 'stress', label: '压力', get: d => stressOf(d) },
   { key: 'caffeine', label: '咖啡因', get: d => d?.caffeine },
   { key: 'exercise', label: '运动时长', get: d => d?.exercise },
 ];
@@ -585,6 +603,60 @@ export function qualityStats(attacks) {
   const list = [...m.values()].map(s => ({ ...s, share: s.n / withQ.length, meanVas: s.vas / s.n })).sort((a, b) => b.n - a.n);
   const meanAll = withQ.length ? withQ.reduce((s, a) => s + vasOf(a), 0) / withQ.length : null;
   return { n: withQ.length, list, meanAll };
+}
+
+// ---------------- 饮食 / 运动：按大类或项目分析 ----------------
+const LOG = { food: 'foods', ex: 'workouts' };
+const matches = (e, key) => key.startsWith('cat:') ? e.cat === key.slice(4) : `${e.cat}/${e.item}` === key.slice(5);
+
+// 记录里出现过的大类和项目（按出现天数排序），以及未分类的条目
+export function logOptions(state, kind) {
+  const field = LOG[kind], cats = new Map(), items = new Map(), uncat = new Map();
+  for (const d of Object.values(state.days)) {
+    const seenC = new Set(), seenI = new Set();
+    for (const e of d[field] || []) {
+      if (e.cat === UNCAT) { uncat.set(e.item, (uncat.get(e.item) || 0) + 1); continue; }
+      if (!seenC.has(e.cat)) { seenC.add(e.cat); cats.set(e.cat, (cats.get(e.cat) || 0) + 1); }
+      const ik = `${e.cat}/${e.item}`;
+      if (!seenI.has(ik)) { seenI.add(ik); items.set(ik, (items.get(ik) || 0) + 1); }
+    }
+  }
+  const sort = m => [...m.entries()].sort((a, b) => b[1] - a[1]);
+  return {
+    cats: sort(cats).map(([c, n]) => ({ key: `cat:${c}`, label: c, days: n })),
+    items: sort(items).map(([ik, n]) => ({ key: `item:${ik}`, label: ik.split('/').slice(1).join('/'), cat: ik.split('/')[0], days: n })),
+    uncat: sort(uncat).map(([name, n]) => ({ name, count: n })),
+  };
+}
+
+// 某个大类 / 项目和头痛的关系。饮食：当天或前一天；运动：当天。只用记过这类内容的日子做比较。
+export function logEffect(state, rows, kind, key) {
+  const field = LOG[kind];
+  const logged = d => !!(d && ((d[field] && d[field].length) || (kind === 'food' ? d.meals : d.exercise != null)));
+  const has = d => (d?.[field] || []).some(e => matches(e, key));
+  const F = {
+    key: 'custom',
+    get: (d, prev) => kind === 'food'
+      ? (!logged(d) && !logged(prev) ? null : +(has(d) || has(prev)))
+      : (!logged(d) ? null : +has(d)),
+  };
+  const tmp = rows.map(r => ({ y: r.y, f: { custom: F.get(r.day, r.prev) } }));
+  return univariate(tmp, F);
+}
+
+// ---------------- 心理状态 ----------------
+export function moodStats(state, rows) {
+  const withMood = rows.filter(r => r.day?.mood);
+  const avg = list => list.length ? list.reduce((s, r) => s + r.day.mood.valence, 0) / list.length : null;
+  const onA = withMood.filter(r => r.y), offA = withMood.filter(r => !r.y);
+  const feel = new Map();
+  for (const r of onA) for (const f of r.day.mood.feelings || []) feel.set(f, (feel.get(f) || 0) + 1);
+  const scales = key => Object.values(state.days).filter(d => d[key]).map(d => ({ date: d.date, ...d[key] })).sort((a, b) => b.date.localeCompare(a.date));
+  return {
+    n: withMood.length, nOn: onA.length, nOff: offA.length, avgOn: avg(onA), avgOff: avg(offA),
+    feelingsOnAttack: [...feel.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4),
+    gad7: scales('gad7'), phq9: scales('phq9'),
+  };
 }
 
 export function taggedTriggers(attacks) {
