@@ -32,8 +32,51 @@ export const pct = x => (x == null || !isFinite(x)) ? '—' : `${Math.round(x * 
 export const SEVERITY = {
   1: { label: '轻度', hint: '能正常活动' },
   2: { label: '中度', hint: '影响日常活动' },
-  3: { label: '重度', hint: '需要卧床休息' },
+  3: { label: '重度', hint: '难以进行日常活动，需要休息' },
 };
+
+// 疼痛强度 0–10（VAS / NRS）。旧记录只有 1–3 级时换算成代表值。
+export const vasOf = a => a.vas ?? ({ 1: 2, 2: 5, 3: 8 }[a.severity] ?? 0);
+export const sevOfVas = v => v <= 0 ? 0 : v <= 3 ? 1 : v <= 6 ? 2 : 3;
+export const vasWord = v => v <= 0 ? '无痛' : v <= 3 ? '轻度' : v <= 6 ? '中度' : v <= 9 ? '重度' : '最剧烈';
+
+// 头部区域（正面图按镜像显示：屏幕左边就是自己的左边）
+export const REGIONS = {
+  vertex: { label: '头顶', area: '头顶', side: 'M' },
+  'forehead-L': { label: '左前额', area: '前额', side: 'L' },
+  'forehead-R': { label: '右前额', area: '前额', side: 'R' },
+  'temple-L': { label: '左太阳穴', area: '太阳穴', side: 'L' },
+  'temple-R': { label: '右太阳穴', area: '太阳穴', side: 'R' },
+  'eye-L': { label: '左眼周', area: '眼周', side: 'L' },
+  'eye-R': { label: '右眼周', area: '眼周', side: 'R' },
+  'face-L': { label: '左面颊', area: '面颊', side: 'L' },
+  'face-R': { label: '右面颊', area: '面颊', side: 'R' },
+  'occiput-L': { label: '左后脑', area: '后脑', side: 'L' },
+  'occiput-R': { label: '右后脑', area: '后脑', side: 'R' },
+  'neck-L': { label: '左后颈', area: '后颈', side: 'L' },
+  'neck-R': { label: '右后颈', area: '后颈', side: 'R' },
+};
+export const REGION_IDS = Object.keys(REGIONS);
+export const LAT_LABEL = { L: '左侧', R: '右侧', B: '双侧', M: '头顶' };
+export function laterality(a) {
+  if (a.regions?.length) {
+    const s = new Set(a.regions.map(r => REGIONS[r]?.side));
+    const L = s.has('L'), R = s.has('R');
+    return L && R ? 'B' : L ? 'L' : R ? 'R' : s.has('M') ? 'M' : null;
+  }
+  const loc = a.locations || [];
+  return loc.includes('双侧') ? 'B' : loc.includes('左侧') ? 'L' : loc.includes('右侧') ? 'R' : null;
+}
+export function regionSummary(a) {
+  if (!a.regions?.length) return (a.locations || []).join('、');
+  if (a.regions.length === REGION_IDS.length) return '整个头部';
+  const areas = [...new Set(REGION_IDS.filter(id => a.regions.includes(id)).map(id => REGIONS[id].area))];
+  const lat = LAT_LABEL[laterality(a)];
+  const list = areas.filter(x => x !== lat);
+  return [lat, list.slice(0, 3).join('、') + (list.length > 3 ? '等' : '')].filter(Boolean).join(' · ');
+}
+
+export const QUALITIES = ['跳痛 / 搏动感', '压迫 / 紧箍感', '胀痛', '刺痛', '钝痛', '灼烧感', '电击样'];
 export const LOCATIONS = ['左侧', '右侧', '双侧', '前额', '太阳穴', '眼后', '头顶', '后脑', '后颈'];
 export const SYMPTOMS = ['恶心', '呕吐', '畏光', '畏声', '视觉先兆', '头晕', '怕气味', '颈部僵硬', '乏力'];
 export const DURATIONS = [
@@ -91,6 +134,9 @@ const P = {
   alert: '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5M12 17v.01"/>',
   edit: '<path d="M4.5 19.5h4l10-10-4-4-10 10z"/><path d="M13 7l4 4"/>',
   calendar: '<rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  checkCircle: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/>',
+  bolt: '<path d="M13 3.5 5.5 13.5h6l-1 7 7.5-10h-6z"/>',
+  chevD: '<path d="m6 9.5 6 6 6-6"/>',
 };
 export const icon = (name, size = 22, sw = 1.8) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;

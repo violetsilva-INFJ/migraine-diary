@@ -8,8 +8,11 @@
 // 5. 相关性：Spearman 等级相关（睡眠、压力等与当天头痛程度）。
 // 6. 趋势：带记录天数偏移量的泊松回归，判断发作频率是否在变化。
 // 7. 经期：经期开始前 2 天至后 3 天的窗口分析。
+// 8. 疼痛强度（VAS 0–10）：只看发作日，用贝叶斯线性回归（正态先验，误差方差用 EM 估计）
+//    看哪些因素让疼痛更重。部位、性质属于“发作表现”而非原因，类别多、样本少，
+//    用描述统计（热力图、占比、各性质平均强度）更稳妥，不做多项回归。
 
-import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth } from './util.js';
+import { dkey, parseKey, shiftKey, todayKey, daysBetween, addMonths, startOfMonth, vasOf, laterality, REGION_IDS } from './util.js';
 
 export const MIN_DAYS = 21;
 export const MIN_ATTACKS = 4;
@@ -218,7 +221,7 @@ export function buildRows(state, { endKey = todayKey(), lookback = 365 } = {}) {
     rows.push({
       key: k,
       y: atks.length ? 1 : 0,
-      sev: atks.reduce((m, a) => Math.max(m, a.severity || 0), 0),
+      vas: atks.reduce((m, a) => Math.max(m, vasOf(a)), 0),
       day,
       f: featuresFor(state, k, starts),
     });
@@ -341,7 +344,7 @@ export function correlations(rows) {
     const xs = [], ys = [];
     for (const r of rows) {
       const v = V.get(r.day);
-      if (v != null) { xs.push(v); ys.push(r.sev); }
+      if (v != null) { xs.push(v); ys.push(r.vas); }
     }
     const n = xs.length;
     if (n < 14) return { ...V, n, rho: null };
@@ -479,6 +482,109 @@ export function medStats(state, month) {
     if (k >= m0 && k < m1 && (d.meds || []).some(m => m.kind !== 'preventive')) days.add(k);
   }
   return { list, acuteDays: days.size };
+}
+
+// ---------------- 疼痛强度：贝叶斯线性回归 ----------------
+export const MIN_INTENSITY = 8;
+
+function bayesLinear(X, y, pv) {
+  const n = X.length, p = X[0].length;
+  const XtX = Array.from({ length: p }, () => new Array(p).fill(0)), Xty = new Array(p).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < p; j++) {
+      Xty[j] += X[i][j] * y[i];
+      for (let k = 0; k < p; k++) XtX[j][k] += X[i][j] * X[i][k];
+    }
+  }
+  const my = y.reduce((s, v) => s + v, 0) / n;
+  let s2 = Math.max(0.25, y.reduce((s, v) => s + (v - my) ** 2, 0) / n);
+  let beta, cov;
+  for (let it = 0; it < 60; it++) {
+    const A = XtX.map((row, j) => row.map((v, k) => v / s2 + (j === k ? 1 / pv[j] : 0)));
+    const L = cholesky(A);
+    if (!L) return null;
+    beta = cholSolve(L, Xty.map(v => v / s2));
+    cov = cholInv(L);
+    let rss = 0, tr = 0;
+    for (let i = 0; i < n; i++) {
+      let f = 0;
+      for (let j = 0; j < p; j++) f += X[i][j] * beta[j];
+      rss += (y[i] - f) ** 2;
+    }
+    for (let j = 0; j < p; j++) for (let k = 0; k < p; k++) tr += XtX[j][k] * cov[k][j];
+    const next = Math.max(0.25, (rss + tr) / n);
+    const done = Math.abs(next - s2) < 1e-6;
+    s2 = next;
+    if (done) break;
+  }
+  return { beta, cov, s2 };
+}
+
+// 哪些因素让疼痛更重：结局 = 每次发作的 VAS，效应单位是“分”
+export function intensityModel(state) {
+  const starts = periodStarts(state.days);
+  const rows = state.attacks.filter(a => vasOf(a) > 0).map(a => ({ y: vasOf(a), f: featuresFor(state, attackDay(a), starts) }));
+  const out = { n: rows.length, ready: rows.length >= MIN_INTENSITY, need: Math.max(0, MIN_INTENSITY - rows.length) };
+  if (!out.ready) return out;
+  out.mean = rows.reduce((s, r) => s + r.y, 0) / rows.length;
+  const feats = FEATURES.filter(F => {
+    let n = 0, e = 0;
+    for (const r of rows) { const v = r.f[F.key]; if (v != null) { n++; e += v; } }
+    return n >= 6 && e >= 2 && n - e >= 2;
+  });
+  if (!feats.length) return out;
+  const means = featureMeans(rows, feats);
+  const X = rows.map(r => [1, ...feats.map((F, j) => (r.f[F.key] ?? means[j]) - means[j])]);
+  // 先验：每个因素的效应 ~ N(0, 2²) 分；截距几乎不加约束
+  const fit = bayesLinear(X, rows.map(r => r.y), [400, ...feats.map(() => 4)]);
+  if (!fit) return out;
+  out.sigma = Math.sqrt(fit.s2);
+  out.effects = feats.map((F, j) => {
+    const b = fit.beta[j + 1], se = Math.sqrt(fit.cov[j + 1][j + 1]), pDir = normCdf(Math.abs(b) / se);
+    const on = rows.filter(r => r.f[F.key] === 1), off = rows.filter(r => r.f[F.key] === 0);
+    const avg = list => list.length ? list.reduce((s, r) => s + r.y, 0) / list.length : null;
+    return {
+      F, est: b, lo: b - 1.96 * se, hi: b + 1.96 * se, pDir, dir: b >= 0 ? 1 : -1,
+      level: pDir >= 0.95 ? 2 : pDir >= 0.8 ? 1 : 0,
+      nOn: on.length, nOff: off.length, meanOn: avg(on), meanOff: avg(off),
+    };
+  }).sort((a, b) => b.level - a.level || Math.abs(b.est) - Math.abs(a.est));
+  return out;
+}
+
+// ---------------- 部位与性质（描述统计） ----------------
+export function regionStats(attacks) {
+  const withR = attacks.filter(a => a.regions?.length);
+  const counts = Object.fromEntries(REGION_IDS.map(id => [id, 0]));
+  for (const a of withR) for (const r of a.regions) if (r in counts) counts[r]++;
+  const lat = { L: 0, R: 0, B: 0, M: 0 };
+  let latN = 0;
+  for (const a of attacks) {
+    const l = laterality(a);
+    if (l) { lat[l]++; latN++; }
+  }
+  const n = withR.length;
+  const heat = Object.fromEntries(REGION_IDS.map(id => [id, n ? counts[id] / n : 0]));
+  const top = REGION_IDS.filter(id => counts[id]).sort((a, b) => counts[b] - counts[a]);
+  // 单侧固定：最近至少 5 次单侧发作全部在同一侧
+  const sided = attacks.slice().sort((a, b) => b.start.localeCompare(a.start)).map(laterality).filter(l => l === 'L' || l === 'R' || l === 'B').slice(0, 8);
+  const sideLocked = sided.length >= 5 && sided.every(l => l === sided[0]) && sided[0] !== 'B' ? sided[0] : null;
+  return { n, counts, heat, top, lat, latN, sideLocked };
+}
+
+export function qualityStats(attacks) {
+  const withQ = attacks.filter(a => a.qualities?.length);
+  const m = new Map();
+  for (const a of withQ) {
+    for (const q of a.qualities) {
+      if (!m.has(q)) m.set(q, { name: q, n: 0, vas: 0 });
+      const s = m.get(q);
+      s.n++; s.vas += vasOf(a);
+    }
+  }
+  const list = [...m.values()].map(s => ({ ...s, share: s.n / withQ.length, meanVas: s.vas / s.n })).sort((a, b) => b.n - a.n);
+  const meanAll = withQ.length ? withQ.reduce((s, a) => s + vasOf(a), 0) / withQ.length : null;
+  return { n: withQ.length, list, meanAll };
 }
 
 export function taggedTriggers(attacks) {

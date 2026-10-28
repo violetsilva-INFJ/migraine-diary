@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9DBB8F"/><stop offset="1" stop-color="#6F9262"/></linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7672F2"/><stop offset="1" stop-color="#4C48D4"/></linearGradient>
     <mask id="m"><rect width="512" height="512" fill="#fff"/><circle cx="297" cy="215" r="118" fill="#000"/></mask>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#g)"/>
   <circle cx="236" cy="266" r="138" fill="#fff" mask="url(#m)"/>
-  <circle cx="358" cy="169" r="23" fill="#F3C9B4"/>
+  <circle cx="358" cy="169" r="23" fill="#F2A385"/>
 </svg>
