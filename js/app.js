@@ -130,13 +130,44 @@ function render() {
   ui.prevTab = ui.tab;
   $app.innerHTML = `
     <main class="view v-${ui.tab} ${anim ? 'anim' : ''}">${views[ui.tab]()}</main>
-    ${ui.tab === 'home' ? `<button class="fab" data-act="new-attack" aria-label="记录头痛">${icon('plus', 28, 2.2)}</button>` : ''}
     <nav class="tabbar" aria-label="主导航">
-      ${TABS.map(([k, label, ic]) => `<button class="tab ${ui.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${icon(ic, 23, ui.tab === k ? 2.1 : 1.8)}<span>${label}</span></button>`).join('')}
+      ${TABS.map(([k, label, ic]) => `<button class="tab ${ui.tab === k ? 'on' : ''} ${ui.tab === k && anim ? 'just' : ''}" data-act="tab" data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${icon(ic, 23, ui.tab === k ? 2.1 : 1.8)}<span>${label}</span></button>`).join('')}
     </nav>`;
+  ui.heroEnter = false;
   bindTrend();
+  if (anim) countUp($app);
+  else popLast($app);
   if (ui.tab === 'me') updatePersistInfo();
 }
+
+// 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
+const POP_ACTS = new Set(['a-toggle', 'a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-stress', 'c-ex', 'c-sleep-set', 'c-period', 'c-alc', 'sel-day', 'med-kind']);
+let lastHit = null;
+const hitKey = el => `${el.dataset.act}|${el.dataset.v ?? el.dataset.id ?? el.dataset.i ?? el.dataset.k ?? el.dataset.m ?? ''}`;
+function popLast(root) {
+  if (!lastHit) return;
+  const act = lastHit.split('|')[0];
+  root.querySelectorAll(`[data-act="${act}"]`).forEach(el => { if (hitKey(el) === lastHit) el.classList.add('pop'); });
+  lastHit = null;
+}
+
+// 数字从 0 滚动到目标值
+function countUp(root) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('[data-count]').forEach(el => {
+    const target = +el.dataset.count, dec = +(el.dataset.dec || 0), t0 = performance.now(), dur = 900;
+    const txt = el.firstChild;
+    if (!txt || txt.nodeType !== 3 || !isFinite(target)) return;
+    const step = now => {
+      const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      txt.textContent = (target * e).toFixed(dec);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    txt.textContent = (0).toFixed(dec);
+    requestAnimationFrame(step);
+  });
+}
+const counted = (v, dec = 0) => v == null || !isFinite(v) ? '—' : `<span data-count="${v}" data-dec="${dec}">${Number(v).toFixed(dec)}</span>`;
 
 const header = (eyebrow, title, right = '') => `<header class="top"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>${right}</header>`;
 
@@ -174,25 +205,26 @@ function tileValue(k, date) {
 
 function installBanner() {
   if (!isIOS || isStandalone() || state.settings.hideInstall) return '';
-  return `<div class="banner"><span class="li-ic">${icon('download', 18, 2)}</span><div class="grow"><b>添加到主屏幕</b>点 Safari 的「分享」按钮，选「添加到主屏幕」。之后从桌面图标打开，像 App 一样使用，数据一直保存在这台手机上。</div>
+  return `<div class="banner"><span class="li-ic gl">${icon('download', 18, 2)}</span><div class="grow"><b>添加到主屏幕</b>点 Safari 的「分享」按钮，选「添加到主屏幕」。之后从桌面图标打开，像 App 一样使用，数据一直保存在这台手机上。</div>
     <button class="icon-btn" data-act="hide-install" aria-label="不再提示">${icon('x', 18)}</button></div>`;
 }
 
 function heroCard() {
   const tk = todayKey(), day = state.days[tk], todays = attacksOn(tk), A = analysis();
+  const cls = `hero ${ui.heroEnter ? 'enter' : ''}`;
   if (todays.length) {
     const a = todays[0], v = vasOf(a);
     const meta = [regionSummary(a), a.qualities?.[0], a.meds?.length ? '已服药' : '还没服药'].filter(Boolean);
-    return `<section class="hero">
+    return `<section class="${cls}">
       <div class="label">今天 ${hhmm(new Date(a.start))} 开始头痛${todays.length > 1 ? ` · 共 ${todays.length} 次` : ''}</div>
-      <div class="vas-big"><b>${v}</b><span>/10 · ${vasWord(v)}</span></div>
-      <div class="meta-line">${meta.map(esc).join(' · ')}</div>
+      <div class="vas-big"><b>${counted(v)}</b><span>/10 · ${vasWord(v)}</span></div>
+      <div class="meta-line">${meta.map(m => `<span>${esc(m)}</span>`).join('<i>·</i>')}</div>
       <div class="actions"><button class="hbtn" data-act="edit-attack" data-id="${a.id}">${icon('edit', 18)}查看 / 修改</button>
         <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}再记一次</button></div>
     </section>`;
   }
   if (day?.pain === 0) {
-    return `<section class="hero">
+    return `<section class="${cls}">
       <div class="label">今天</div><h2>没有头痛 ${icon('checkCircle', 22, 2)}</h2>
       <p>${['继续保持，记得按时吃饭、多喝水', '好好休息，今天也很棒', '状态不错，晚上早点睡'][new Date().getDate() % 3]}</p>
       <button class="link" data-act="new-attack">其实头痛了？记录一下 ${icon('chevR', 16)}</button>
@@ -200,7 +232,7 @@ function heroCard() {
   }
   const risk = A.forecast && A.forecast.ratio >= 1.5
     ? `<div class="risk">${icon('alert', 18)}<span>根据今天的打卡，发作风险比平时高（约 ${pct(A.forecast.p)}），可以早点休息、把药带在身边。</span></div>` : '';
-  return `<section class="hero">
+  return `<section class="${cls}">
     <div class="label">今日状态</div><h2>今天头痛了吗？</h2><p>每天点一下，分析会更准确</p>
     <div class="actions"><button class="hbtn" data-act="no-pain">${icon('check', 18, 2.2)}没有头痛</button>
       <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}记录头痛</button></div>
@@ -221,13 +253,16 @@ function viewHome() {
       <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}
   ${installBanner()}
   ${heroCard()}
-  <div class="sec"><h2>今日打卡</h2><span class="progress-text">${done}/6</span></div>
+  <div class="sec"><h2>今日打卡</h2>
+    <svg class="check-ring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" style="stroke:var(--fill-2)" stroke-width="3"/>
+      ${done ? `<circle class="val" cx="11" cy="11" r="9" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(done / 6 * 56.5).toFixed(1)} 56.5"/>` : ''}</svg>
+    <span class="progress-text">${done}/6</span></div>
   <div class="grid3">
     ${TILES.map(t => {
       const [ok, text] = tileValue(t.k, tk);
       return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.label}：${esc(text)}">
-        <span class="ti" style="background:${t.color}">${icon(t.ic, 19, 2)}</span><b>${t.label}</b><span>${esc(text)}</span>
-        ${ok ? `<i class="tick">${icon('checkCircle', 18, 2)}</i>` : ''}</button>`;
+        <span class="gl" style="--c:${t.color}">${icon(t.ic, 20, 2.1)}</span><b>${t.label}</b><span class="val">${esc(text)}</span>
+        ${ok ? `<i class="tick">${icon('check', 12, 3.2)}</i>` : ''}</button>`;
     }).join('')}
   </div>
   <div class="sec"><h2>近 30 天</h2><span class="meta">本月 ${state.attacks.filter(a => S.attackDay(a).startsWith(tk.slice(0, 7))).length} 次</span></div>
@@ -251,7 +286,7 @@ function trendCard() {
   trendPts.forEach((p, i) => {
     if (!p.vas) return;
     const x0 = tx(i) - bw / 2, y0 = base - Math.max(3, p.vas * unit);
-    bars += `<path d="M${x0} ${base}V${y0 + r}Q${x0} ${y0} ${x0 + r} ${y0}H${x0 + bw - r}Q${x0 + bw} ${y0} ${x0 + bw} ${y0 + r}V${base}Z" style="fill:var(--sev${sevOfVas(p.vas)})"/>`;
+    bars += `<path class="bar-anim" d="M${x0} ${base}V${y0 + r}Q${x0} ${y0} ${x0 + r} ${y0}H${x0 + bw - r}Q${x0 + bw} ${y0} ${x0 + bw} ${y0 + r}V${base}Z" style="fill:var(--sev${sevOfVas(p.vas)});animation-delay:${(0.2 + i * 0.015).toFixed(3)}s"/>`;
   });
   const sy = s => 124 - (Math.max(4, Math.min(10, s)) - 4) / 6 * 34;
   let path = '', dots = '';
@@ -372,10 +407,10 @@ function viewAnalysis() {
       <span>${m0.getFullYear()}年${m0.getMonth() + 1}月</span>
       <button class="icon-btn" data-act="month" data-d="1" aria-label="下个月" ${isCur ? 'disabled' : ''}>${icon('chevR', 20)}</button></div>`)}
   <div class="stats">
-    <div class="stat"><div class="k">头痛次数</div><div class="v">${inMonth.length}<small>次</small></div><div class="d">${delta === 0 ? '与上月持平' : `比上月${delta > 0 ? '多' : '少'} ${Math.abs(delta)} 次`}</div></div>
-    <div class="stat"><div class="k">平均强度</div><div class="v">${inMonth.length ? fmtNum(mean(inMonth.map(vasOf))) : '—'}<small>/10</small></div><div class="d">${inMonth.length ? vasWord(Math.round(mean(inMonth.map(vasOf)))) : '本月无记录'}</div></div>
-    <div class="stat"><div class="k">平均持续</div><div class="v">${durs.length ? fmtNum(mean(durs)) : '—'}<small>小时</small></div><div class="d">按所选时长估算</div></div>
-    <div class="stat"><div class="k">止痛药</div><div class="v">${acuteDays}<small>天</small></div><div class="d">${acuteDays >= 10 ? '偏多，留意一下' : '本月用药天数'}</div></div>
+    <div class="stat"><div class="k">头痛次数</div><div class="v">${counted(inMonth.length)}<small>次</small></div><div class="d">${delta === 0 ? '与上月持平' : `比上月${delta > 0 ? '多' : '少'} ${Math.abs(delta)} 次`}</div></div>
+    <div class="stat"><div class="k">平均强度</div><div class="v">${inMonth.length ? counted(Number(fmtNum(mean(inMonth.map(vasOf)))), 1) : '—'}<small>/10</small></div><div class="d">${inMonth.length ? vasWord(Math.round(mean(inMonth.map(vasOf)))) : '本月无记录'}</div></div>
+    <div class="stat"><div class="k">平均持续</div><div class="v">${durs.length ? counted(Number(fmtNum(mean(durs))), 1) : '—'}<small>小时</small></div><div class="d">按所选时长估算</div></div>
+    <div class="stat"><div class="k">止痛药</div><div class="v">${counted(acuteDays)}<small>天</small></div><div class="d">${acuteDays >= 10 ? '偏多，留意一下' : '本月用药天数'}</div></div>
   </div>
   ${calendarCard()}
   ${forecastCard(analysis())}
@@ -434,7 +469,9 @@ function dayDetail(k) {
   if (doses.length) pills.push(`<span class="pill"><i class="dot" style="background:var(--med);width:6px;height:6px"></i>${doses.map(m => esc(m.name)).join('、')}</span>`);
   return `<div class="day-detail">
     <h4>${mdw(k)}</h4>
-    ${atk.length ? `<div class="group recs" style="box-shadow:none;border:0;background:var(--fill);margin-bottom:10px">${atk.map(recordRow).join('')}</div>` : ''}
+    ${atk.map(a => `<button class="mini-rec" data-act="edit-attack" data-id="${a.id}"><span class="vb s${sevOfVas(vasOf(a))}">${vasOf(a)}</span>
+      <span class="grow">${hhmm(new Date(a.start))} · ${esc([regionSummary(a), a.qualities?.[0], a.duration ? durationOf(a.duration).label : ''].filter(Boolean).join(' · ') || vasWord(vasOf(a)))}</span>
+      <span class="chev">${icon('chevR', 16)}</span></button>`).join('')}
     ${pills.length ? `<div class="kv">${pills.join('')}</div>` : atk.length ? '' : '<p class="muted" style="margin:0;font-size:14px">这天没有记录</p>'}
     <div class="btn-row">
       <button class="btn pain" data-act="new-attack" data-k="${k}">${icon('plus', 18, 2.2)}补记头痛</button>
@@ -451,7 +488,7 @@ function forecastCard(A) {
     <div class="card-head"><h3>今日发作风险</h3><span class="badge ${level[0]}">${level[1]}</span></div>
     <div class="forecast">
       <div class="ring"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="34" fill="none" style="stroke:var(--fill)" stroke-width="9"/>
-        <circle cx="42" cy="42" r="34" fill="none" style="stroke:var(--pain)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(p * C).toFixed(1)} ${C.toFixed(1)}"/></svg><b>${pct(p)}</b></div>
+        <circle class="val" cx="42" cy="42" r="34" fill="none" style="stroke:var(--pain)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(p * C).toFixed(1)} ${C.toFixed(1)}"/></svg><b>${counted(Math.round(p * 100))}%</b></div>
       <p class="sub">根据今天的打卡，今天开始一次头痛的概率约 <b>${pct(p)}</b>，你平时约 <b>${pct(A.baseRate)}</b>。${drivers.length ? `<br>主要因为：${drivers.map(F => F.label).join('、')}。` : ''}</p>
     </div>
     <p class="note">模型交叉验证的区分能力 AUC = ${A.auc.toFixed(2)}（0.5 相当于随机猜测，1 为完美）。仅供参考。</p>
@@ -662,7 +699,7 @@ function medsCard() {
 // ----------------------- 我的 -----------------------
 function viewMe() {
   const s = state.settings;
-  const row = (act, ic, color, t, sub = '', cls = '') => `<button class="row ${cls}" data-act="${act}"><span class="li-ic" style="background:${color}">${icon(ic, 18, 2)}</span>
+  const row = (act, ic, color, t, sub = '', cls = '') => `<button class="row ${cls}" data-act="${act}"><span class="li-ic gl" style="--c:${color}">${icon(ic, 18, 2)}</span>
     <div class="grow"><div class="t">${t}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div><span class="chev">${icon('chevR', 18)}</span></button>`;
   return `
   ${header('数据只保存在这台设备上', '我的')}
@@ -671,7 +708,7 @@ function viewMe() {
 
   <div class="group-label"><span>常用药物</span></div>
   <div class="group">
-    ${s.meds.map((m, i) => `<div class="row"><span class="li-ic" style="background:var(--med)">${icon('pill', 18, 2)}</span>
+    ${s.meds.map((m, i) => `<div class="row"><span class="li-ic gl" style="--c:var(--med)">${icon('pill', 18, 2)}</span>
       <div class="grow"><div class="t">${esc(m.name)} <span class="muted">${esc(m.dose)}</span></div></div>
       <button class="badge ${m.kind === 'preventive' ? 'accent' : 'flat'}" data-act="med-kind" data-i="${i}" aria-label="切换用药类型">${m.kind === 'preventive' ? '预防' : '止痛'}</button>
       <button class="icon-btn" data-act="med-del" data-i="${i}" aria-label="删除 ${esc(m.name)}">${icon('trash', 18)}</button></div>`).join('')}
@@ -695,9 +732,9 @@ function viewMe() {
 
   <div class="group-label"><span>关于</span></div>
   <div class="group">
-    <div class="row"><span class="li-ic" style="background:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic" style="background:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.1</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.2</div></div></div>
   </div>`;
 }
 
@@ -748,6 +785,7 @@ function renderSheet(fresh) {
   } else {
     $sheet.className = 'sheet-root open';
     $sheet.querySelector('.sheet-body').scrollTop = prevScroll;
+    popLast($sheet);
   }
 }
 
@@ -771,7 +809,7 @@ const SHEETS = {
   day: s => ({
     full: true,
     title: mdw(s.date),
-    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic" style="background:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}</div>${editor(t.k, s.date)}`).join(''),
+    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic gl" style="--c:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}</div>${editor(t.k, s.date)}`).join(''),
     foot: doneFoot,
   }),
   factor: s => factorSheet(s.k),
@@ -786,8 +824,8 @@ const SHEETS = {
 
 function vasWidget(v) {
   const set = v != null && v > 0;
-  return `<div class="vas ${set ? '' : 'unset'}" id="vas">
-    <div class="vas-head"><span class="vas-num">${set ? v : '–'}<small>/10</small></span><span class="vas-word">${set ? vasWord(v) : ''}</span>
+  return `<div class="vas ${set ? '' : 'unset'}" id="vas" style="--vas-c:var(--sev${sevOfVas(v || 0) || 1})">
+    <div class="vas-head"><span class="vas-num" data-v="${set ? v : 0}">${set ? v : '–'}<small>/10</small></span><span class="vas-word">${set ? vasWord(v) : ''}</span>
       <span class="vas-hint">${set ? SEVERITY[sevOfVas(v)].hint : '拖动滑块选择'}</span></div>
     <input class="range" type="range" min="0" max="10" step="1" value="${set ? v : 0}" data-input="a-vas" aria-label="疼痛强度，0 到 10 分" aria-valuetext="${set ? `${v} 分，${vasWord(v)}` : '未选择'}">
     <div class="vas-scale">${[0, 2, 4, 6, 8, 10].map(n => `<span>${n}</span>`).join('')}</div>
@@ -798,12 +836,42 @@ function vasWidget(v) {
 function updateVasWidget(v) {
   const box = document.getElementById('vas');
   if (!box) return;
-  const set = v > 0;
+  const set = v > 0, num = box.querySelector('.vas-num');
   box.classList.toggle('unset', !set);
-  box.querySelector('.vas-num').innerHTML = `${set ? v : '–'}<small>/10</small>`;
+  box.style.setProperty('--vas-c', `var(--sev${sevOfVas(v) || 1})`);
+  if (num.dataset.v !== String(v)) {
+    num.dataset.v = v;
+    num.innerHTML = `${set ? v : '–'}<small>/10</small>`;
+    num.classList.remove('bump'); void num.offsetWidth; num.classList.add('bump');
+  }
   box.querySelector('.vas-word').textContent = set ? vasWord(v) : '';
   box.querySelector('.vas-hint').textContent = set ? SEVERITY[sevOfVas(v)].hint : '拖动滑块选择';
   box.querySelector('.range').setAttribute('aria-valuetext', set ? `${v} 分，${vasWord(v)}` : '未选择');
+}
+
+// 开始时间：自绘的日期 / 时间胶囊，上面盖一个透明的原生输入框，点一下弹出系统选择器
+const dayLabel = dt => {
+  const k = dkey(dt), tk = todayKey();
+  const head = k === tk ? '今天' : k === shiftKey(tk, -1) ? '昨天' : `${dt.getMonth() + 1}月${dt.getDate()}日`;
+  return `${head} 周${WEEK[dt.getDay()]}`;
+};
+function startPicker(d) {
+  const dt = parseLocal(d.start);
+  return `<div class="dt-row">
+      <label class="dt-pill">${icon('calendar', 19, 2)}<span class="dt-date">${dayLabel(dt)}</span>
+        <input type="date" value="${dkey(dt)}" max="${todayKey()}" data-input="a-date" aria-label="头痛开始的日期"></label>
+      <label class="dt-pill">${icon('clock', 19, 2)}<span class="dt-time">${hhmm(dt)}</span>
+        <input type="time" value="${hhmm(dt)}" data-input="a-time" aria-label="头痛开始的时间"></label>
+    </div>
+    <div class="chips" style="margin-top:10px">${[['现在', 0], ['半小时前', 30], ['1 小时前', 60], ['3 小时前', 180]]
+      .map(([l, m]) => `<button class="chip mini" data-act="a-ago" data-v="${m}">${l}</button>`).join('')}</div>`;
+}
+function updateStartPicker() {
+  const dt = parseLocal(draft().start);
+  const box = $sheet.querySelector('.dt-row');
+  if (!box || isNaN(dt)) return;
+  box.querySelector('.dt-date').textContent = dayLabel(dt);
+  box.querySelector('.dt-time').textContent = hhmm(dt);
 }
 
 function regionPicker(d) {
@@ -830,7 +898,7 @@ function attackBody(d) {
   const custom = state.settings.customTriggers;
   const triggers = [...TRIGGERS, ...custom, ...d.triggers.filter(t => !TRIGGERS.includes(t) && !custom.includes(t))];
   return [
-    sec('开始时间', `<input class="field" type="datetime-local" value="${d.start}" data-input="a-start" aria-label="开始时间">`),
+    sec('开始时间', startPicker(d)),
     sec('疼痛强度', vasWidget(d.vas)),
     sec('疼痛部位', regionPicker(d), '<small>屏幕左边就是你的左边</small>'),
     sec('疼痛性质', multi('qualities', QUALITIES), '<small>可多选</small>'),
@@ -1109,6 +1177,7 @@ const ACTIONS = {
     const day = structuredClone(state.days[tk] || { date: tk });
     day.pain = 0;
     saveDay(day);
+    ui.heroEnter = true;
     render();
     toast('已记录：今天没有头痛');
   },
@@ -1131,6 +1200,7 @@ const ACTIONS = {
   method: () => openSheet({ type: 'method' }),
 
   // ---- 头痛表单 ----
+  'a-ago': el => { draft().start = toLocalInput(new Date(Date.now() - +el.dataset.v * 60000)); touch(); },
   region: el => {
     const r = draft().regions, id = el.dataset.id, i = r.indexOf(id);
     if (i >= 0) r.splice(i, 1); else r.push(id);
@@ -1266,7 +1336,16 @@ const ACTIONS = {
 };
 
 const INPUTS = {
-  'a-start': el => { draft().start = el.value; ui.sheet.dirty = true; },
+  'a-date': el => {
+    if (!el.value) return;
+    draft().start = `${el.value}T${draft().start.split('T')[1] || '00:00'}`;
+    ui.sheet.dirty = true; updateStartPicker();
+  },
+  'a-time': el => {
+    if (!el.value) return;
+    draft().start = `${draft().start.split('T')[0]}T${el.value}`;
+    ui.sheet.dirty = true; updateStartPicker();
+  },
   'a-note': el => { draft().note = el.value; ui.sheet.dirty = true; },
   'a-med-time': el => { draft().meds[+el.dataset.i].time = el.value; ui.sheet.dirty = true; },
   'a-vas': el => { const v = +el.value; draft().vas = v > 0 ? v : null; ui.sheet.dirty = true; updateVasWidget(v); },
@@ -1274,10 +1353,17 @@ const INPUTS = {
 };
 
 document.addEventListener('click', e => {
+  // 桌面浏览器点透明的日期 / 时间框不会自动弹出选择器，手动打开（iOS 点一下本来就会弹出）
+  const picker = e.target.closest('.dt-pill input');
+  if (picker && !isIOS) { try { picker.showPicker(); } catch { /* 不支持 */ } }
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   const fn = ACTIONS[el.dataset.act];
-  if (fn) { e.preventDefault(); fn(el, e); }
+  if (fn) {
+    e.preventDefault();
+    if (POP_ACTS.has(el.dataset.act)) lastHit = hitKey(el);
+    fn(el, e);
+  }
 });
 document.addEventListener('input', e => {
   const el = e.target.closest('[data-input]');
