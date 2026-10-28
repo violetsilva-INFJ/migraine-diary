@@ -1,14 +1,14 @@
 {
-  "name": "头痛日记",
-  "short_name": "头痛日记",
+  "name": "晴雨手记 · 偏头痛日记",
+  "short_name": "晴雨手记",
   "description": "记录偏头痛发作、用药与生活习惯，数据只保存在本机。",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F2F3F7",
-  "theme_color": "#5B57E0",
+  "background_color": "#F5F2EC",
+  "theme_color": "#5A5DC4",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }

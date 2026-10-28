@@ -204,6 +204,7 @@ const P = {
   smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2c1.8 2.2 5 2.2 6.8 0"/><path d="M9.3 9.6v.6M14.7 9.6v.6"/>',
   clipboard: '<rect x="5.5" y="4.5" width="13" height="16" rx="2.5"/><path d="M9.5 4.5V3.6c0-.6.4-1.1 1-1.1h3c.6 0 1 .5 1 1.1v.9M9 10h6M9 13.5h6M9 17h3.5"/>',
   phone: '<path d="M6.5 3.5h3l1.5 4-2 1.3a10 10 0 0 0 5.2 5.2l1.3-2 4 1.5v3a2 2 0 0 1-2.2 2A15.8 15.8 0 0 1 4.5 5.7a2 2 0 0 1 2-2.2z"/>',
+  mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>',
 };
 export const icon = (name, size = 22, sw = 1.8) =>
   `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;

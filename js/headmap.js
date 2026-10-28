@@ -1,5 +1,5 @@
 // 头部示意图：现代可爱风的小女孩 / 小男孩，四个视角：正面（镜像，屏幕左边 = 自己的左边）、左侧、右侧、背面。
-// 扁平色块，没有描边；可点区域是透明的，选中后在对应位置晕染一层柔和的珊瑚色。
+// 扁平色块，没有描边；可点区域是透明的。选中后在该部位点上一团左右对称、四周均匀淡开的柔光（不裁切，所以没有硬边）。
 import { REGIONS } from './util.js';
 
 const W = 240;
@@ -55,6 +55,23 @@ const REG = {
   ],
   backNeck: [['neck-L', HALF_L], ['neck-R', HALF_R]],
 };
+
+// 选中时的柔光：每个部位一个椭圆 [cx, cy, rx, ry]，正面 / 背面左右对称
+const SPOT_FRONT = {
+  vertex: [120, 56, 36, 15],
+  'forehead-L': [99, 96, 21, 14], 'forehead-R': [141, 96, 21, 14],
+  'temple-L': [61, 114, 13, 18], 'temple-R': [179, 114, 13, 18],
+  'eye-L': [94, 132, 17, 12], 'eye-R': [146, 132, 17, 12],
+  'face-L': [82, 160, 19, 15], 'face-R': [158, 160, 19, 15],
+};
+const SPOT_BACK = {
+  vertex: [120, 58, 36, 15],
+  'parietal-L': [63, 104, 14, 20], 'parietal-R': [177, 104, 14, 20],
+  'occiput-L': [97, 140, 22, 24], 'occiput-R': [143, 140, 22, 24],
+  'neck-L': [113, 196, 8, 15], 'neck-R': [127, 196, 8, 15],
+};
+const SPOT_SIDE = { vertex: [112, 56, 32, 14], forehead: [167, 84, 19, 14], temple: [141, 112, 12, 17], eye: [168, 131, 15, 11], face: [160, 163, 19, 14], parietal: [104, 88, 17, 14], occiput: [66, 126, 17, 26], neck: [120, 196, 12, 15] };
+const spotOf = (view, rid) => view === 'front' ? SPOT_FRONT[rid] : view === 'back' ? SPOT_BACK[rid] : SPOT_SIDE[rid === 'vertex' ? 'vertex' : rid.replace(/-[LR]$/, '')];
 
 // ---------------- 角色 ----------------
 // 每层：[类名, 路径]。under 画在晕染之下，over（五官、腮红）画在晕染之上
@@ -159,14 +176,16 @@ export function headSVG(view, { sex = 'female', on = new Set(), heat = null, int
   const regs = profile ? REG.profile(side) : REG[view];
   const neckRegs = profile ? REG.profileNeck(side) : view === 'back' ? REG.backNeck : [];
 
-  // 晕染：选中区域或热力，统一轻微模糊，边缘柔和
-  const tint = ([rid, d]) => {
-    const t = heat ? (heat[rid] || 0) : on.has(rid) ? 1 : 0;
-    return t > 0 ? `<path d="${d}" style="opacity:${heat ? (0.2 + 0.7 * t).toFixed(2) : 1}"/>` : '';
+  // 柔光：径向渐变的椭圆，中心最浓、向四周均匀淡开；热力图按比例调透明度
+  const tint = ([rid]) => {
+    const t = heat ? (heat[rid] || 0) : on.has(rid) ? 1 : 0, sp = spotOf(view, rid);
+    if (!(t > 0) || !sp) return '';
+    const [cx, cy, rx, ry] = sp;
+    return `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="url(#${id}-g)" opacity="${heat ? (0.25 + 0.75 * t).toFixed(2) : 1}"/>`;
   };
-  const wash = (list, clip) => {
+  const wash = list => {
     const inner = list.map(tint).join('');
-    return inner ? `<g clip-path="url(#${id}-${clip})"><g class="wash" filter="url(#${id}-b)">${inner}</g></g>` : '';
+    return inner ? `<g class="wash">${inner}</g>` : '';
   };
   const hit = ([rid, d]) => {
     const label = REGIONS[rid].label + (heat ? ` ${Math.round((heat[rid] || 0) * 100)}%` : '');
@@ -183,12 +202,12 @@ export function headSVG(view, { sex = 'female', on = new Set(), heat = null, int
     <defs>
       <clipPath id="${id}-h"><path d="${head}"/></clipPath>
       <clipPath id="${id}-n"><path d="${NECK}"/></clipPath>
-      <filter id="${id}-b" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.5"/></filter>
+      <radialGradient id="${id}-g"><stop offset="0" class="wg0"/><stop offset=".6" class="wg1"/><stop offset="1" class="wg2"/></radialGradient>
     </defs>
     <circle class="medal" cx="120" cy="128" r="104"/>
     <g${flip}>
       ${layer(art.under)}
-      ${wash(regs, 'h')}${wash(neckRegs, 'n')}
+      ${wash([...regs, ...neckRegs])}
       ${layer(art.over)}
       ${neckRegs.length ? `<g clip-path="url(#${id}-n)">${neckRegs.map(hit).join('')}</g>` : ''}
       <g clip-path="url(#${id}-h)">${regs.map(hit).join('')}</g>

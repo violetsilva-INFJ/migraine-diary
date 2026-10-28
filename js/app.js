@@ -8,6 +8,8 @@ import {
 } from './util.js';
 import { headSVG, VIEWS, VIEW_REGIONS } from './headmap.js';
 import * as S from './stats.js';
+import { parseText, fromAI, itemText, dayWord } from './parse.js';
+import { AI_PRESETS, aiConf, aiReady, aiParse } from './ai.js';
 
 // ======================= 状态 =======================
 const state = {
@@ -15,7 +17,11 @@ const state = {
   days: {},
   settings: { name: '', meds: DEFAULT_MEDS.map(m => ({ ...m })), customTriggers: [], hideInstall: false },
 };
-const ui = { tab: 'home', prevTab: null, month: startOfMonth(new Date()), sel: todayKey(), sheet: null };
+const ui = { tab: 'home', prevTab: null, month: startOfMonth(new Date()), sel: todayKey(), sheet: null, qeText: '' };
+// AI 识别的设置（含密钥）单独存放，不放进 settings，所以不会跟着备份导出
+const AI_DEFAULT = () => ({ enabled: false, preset: null, cfg: {} });
+state.ai = AI_DEFAULT();
+try { ui.qeText = localStorage.getItem('qe-draft') || ''; } catch { /* 无痕模式等 */ }
 let cache = null;
 const analysis = () => (cache ||= S.analyze(state));
 const invalidate = () => { cache = null; };
@@ -36,6 +42,8 @@ async function load() {
   state.days = Object.fromEntries(days.map(d => [d.date, d]));
   const s = meta.find(m => m.key === 'settings');
   if (s) Object.assign(state.settings, s.value);
+  const ai = meta.find(m => m.key === 'ai');
+  if (ai) Object.assign(state.ai, ai.value);
 }
 
 let persistAsked = false;
@@ -45,6 +53,7 @@ function afterWrite() {
 }
 
 const saveSettings = () => db.put('meta', { key: 'settings', value: state.settings });
+const saveAI = () => db.put('meta', { key: 'ai', value: state.ai });
 
 function saveDay(day) {
   if (S.keepDay(day)) {
@@ -130,7 +139,7 @@ const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platfor
 const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 
 // ======================= 渲染 =======================
-const TABS = [['home', '今天', 'home'], ['records', '记录', 'list'], ['analysis', '分析', 'chart'], ['me', '我的', 'user']];
+const TABS = [['home', '今日', 'home'], ['records', '手记', 'list'], ['analysis', '洞察', 'chart'], ['me', '我的', 'user']];
 
 function render() {
   const views = { home: viewHome, records: viewRecords, analysis: viewAnalysis, me: viewMe };
@@ -150,7 +159,7 @@ function render() {
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
-const POP_ACTS = new Set(['c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-ex', 'c-sleep-set', 'c-period', 'sel-day', 'med-kind']);
+const POP_ACTS = new Set(['qi-toggle', 'qi-med', 'ai-preset', 'q-attach', 'c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-ex', 'c-sleep-set', 'c-period', 'sel-day', 'med-kind']);
 let lastHit = null;
 const hitKey = el => `${el.dataset.act}|${el.dataset.v ?? el.dataset.id ?? el.dataset.i ?? el.dataset.k ?? el.dataset.m ?? ''}`;
 function popLast(root) {
@@ -183,13 +192,14 @@ const counted = (v, dec = 0) => v == null || !isFinite(v) ? '—' : `<span data-
 const header = (eyebrow, title, right = '') => `<header class="top"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>${right}</header>`;
 
 // ----------------------- 今天 -----------------------
+// 小记的六个格子：文艺的名字 + 旁边小字写明是什么
 const TILES = [
-  { k: 'period', label: '经期', ic: 'drop', color: 'var(--t-period)' },
-  { k: 'diet', label: '饮食', ic: 'utensils', color: 'var(--t-diet)' },
-  { k: 'sleep', label: '睡眠', ic: 'moon', color: 'var(--t-sleep)' },
-  { k: 'mood', label: '心情', ic: 'smile', color: 'var(--t-stress)' },
-  { k: 'exercise', label: '运动', ic: 'dumbbell', color: 'var(--t-exercise)' },
-  { k: 'meds', label: '服药', ic: 'pill', color: 'var(--t-meds)' },
+  { k: 'period', label: '月汐', plain: '经期', ic: 'drop', color: 'var(--t-period)' },
+  { k: 'diet', label: '食光', plain: '饮食', ic: 'utensils', color: 'var(--t-diet)' },
+  { k: 'sleep', label: '入梦', plain: '睡眠', ic: 'moon', color: 'var(--t-sleep)' },
+  { k: 'mood', label: '心晴', plain: '心情', ic: 'smile', color: 'var(--t-stress)' },
+  { k: 'exercise', label: '舒展', plain: '运动', ic: 'dumbbell', color: 'var(--t-exercise)' },
+  { k: 'meds', label: '药笺', plain: '服药', ic: 'pill', color: 'var(--t-meds)' },
 ];
 
 function tileValue(k, date) {
@@ -246,25 +256,37 @@ function heroCard() {
   }
   if (day?.pain === 0) {
     return `<section class="${cls}">
-      <div class="label">今天</div><h2>没有头痛 ${icon('checkCircle', 22, 2)}</h2>
-      <p>${['继续保持，记得按时吃饭、多喝水', '好好休息，今天也很棒', '状态不错，晚上早点睡'][new Date().getDate() % 3]}</p>
+      <div class="label">今日天色</div><h2>晴 · 没有头痛 ${icon('checkCircle', 22, 2)}</h2>
+      <p>${['愿今天的光一直这样柔和，记得按时吃饭、多喝水', '天色正好，今晚也早些入梦', '状态不错，把这份轻盈留久一点'][new Date().getDate() % 3]}</p>
       <button class="link" data-act="new-attack">其实头痛了？记录一下 ${icon('chevR', 16)}</button>
     </section>`;
   }
   const risk = A.forecast && A.forecast.ratio >= 1.5
     ? `<div class="risk">${icon('alert', 18)}<span>根据今天的打卡，发作风险比平时高（约 ${pct(A.forecast.p)}），可以早点休息、把药带在身边。</span></div>` : '';
   return `<section class="${cls}">
-    <div class="label">今日状态</div><h2>今天头痛了吗？</h2><p>每天点一下，分析会更准确</p>
-    <div class="actions"><button class="hbtn" data-act="no-pain">${icon('check', 18, 2.2)}没有头痛</button>
-      <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}记录头痛</button></div>
+    <div class="label">今日天色</div><h2>今天，头还好吗？</h2><p>每天落一笔，规律会像画一样慢慢浮现</p>
+    <div class="actions"><button class="hbtn" data-act="no-pain">${icon('check', 18, 2.2)}晴，没有头痛</button>
+      <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}记下头痛</button></div>
     ${risk}
+  </section>`;
+}
+
+// 一句话记录：用键盘上的语音输入说一段，识别成选项，确认后填好
+function quickCard() {
+  const on = aiReady(aiConf(state.ai));
+  return `<section class="card qe">
+    <div class="qe-head"><span class="gl" style="--c:var(--accent)">${icon('mic', 18, 2.1)}</span>
+      <div class="grow"><b>说给手记听</b><span>点键盘上的麦克风说一段，我来帮你分好类</span></div></div>
+    <textarea class="field qe-text" data-input="qe-text" rows="3" aria-label="用一段话描述今天的情况" placeholder="比如：下午三点左边太阳穴跳着疼，大概 6 分，吃了布洛芬；昨晚只睡了 5 小时。">${esc(ui.qeText)}</textarea>
+    <div class="qe-foot"><span class="qe-mode">${on ? `${icon('sparkle', 14, 2)}AI 理解已开启` : '在手机上识别，不联网'}</span>
+      <button class="btn primary" data-act="qe-parse">${icon('sparkle', 17, 2)}帮我记下</button></div>
   </section>`;
 }
 
 function viewHome() {
   const now = new Date(), tk = todayKey();
   const h = now.getHours();
-  const greet = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+  const greet = h < 5 ? '夜深了' : h < 11 ? '早安' : h < 14 ? '午安' : h < 18 ? '午后安好' : h < 22 ? '晚风轻柔' : '夜深了';
   const name = (state.settings.name || '').trim();
   const streak = streakDays();
   const done = TILES.filter(t => tileValue(t.k, tk)[0]).length;
@@ -274,15 +296,16 @@ function viewHome() {
       <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}
   ${installBanner()}
   ${heroCard()}
-  <div class="sec"><h2>今日打卡</h2>
+  ${quickCard()}
+  <div class="sec"><h2>今日小记</h2>
     <svg class="check-ring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" style="stroke:var(--fill-2)" stroke-width="3"/>
       ${done ? `<circle class="val" cx="11" cy="11" r="9" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(done / 6 * 56.5).toFixed(1)} 56.5"/>` : ''}</svg>
     <span class="progress-text">${done}/6</span></div>
   <div class="grid3">
     ${TILES.map(t => {
       const [ok, text] = tileValue(t.k, tk);
-      return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.label}：${esc(text)}">
-        <span class="gl" style="--c:${t.color}">${icon(t.ic, 20, 2.1)}</span><b>${t.label}</b><span class="val">${esc(text)}</span>
+      return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.plain}：${esc(text)}">
+        <span class="gl" style="--c:${t.color}">${icon(t.ic, 20, 2.1)}</span><b>${t.label}<small>${t.plain}</small></b><span class="val">${esc(text)}</span>
         ${ok ? `<i class="tick">${icon('check', 12, 3.2)}</i>` : ''}</button>`;
     }).join('')}
   </div>
@@ -372,11 +395,11 @@ function bindTrend() {
 // ----------------------- 记录 -----------------------
 function viewRecords() {
   const list = state.attacks;
-  const head = header(list.length ? `共 ${list.length} 次头痛` : '还没有记录', '记录');
+  const head = header(list.length ? `共 ${list.length} 次头痛` : '还没有记录', '手记');
   if (!list.length) {
-    return head + `<div class="empty"><div class="art">${icon('file', 38)}</div><h3>这里会列出每一次头痛</h3>
-      <p>头痛时点「记录头痛」，滑一下强度、点一下部位，几秒钟就能记完。</p>
-      <button class="btn primary" data-act="new-attack">${icon('plus', 18, 2.2)}记录头痛</button></div>`;
+    return head + `<div class="empty"><div class="art">${icon('file', 38)}</div><h3>每一场头痛，都会安静地留在这里</h3>
+      <p>头痛时点「记下头痛」，滑一下强度、点一下部位，几秒钟就能记完；也可以在首页直接说一段。</p>
+      <button class="btn primary" data-act="new-attack">${icon('plus', 18, 2.2)}记下头痛</button></div>`;
   }
   const groups = new Map();
   for (const a of list) {
@@ -423,7 +446,7 @@ function viewAnalysis() {
   const all = state.attacks;
 
   return `
-  ${header('头痛日记', '分析', `<div class="month-nav">
+  ${header('晴雨手记', '洞察', `<div class="month-nav">
       <button class="icon-btn" data-act="month" data-d="-1" aria-label="上个月">${icon('chevL', 20)}</button>
       <span>${m0.getFullYear()}年${m0.getMonth() + 1}月</span>
       <button class="icon-btn" data-act="month" data-d="1" aria-label="下个月" ${isCur ? 'disabled' : ''}>${icon('chevR', 20)}</button></div>`)}
@@ -813,6 +836,9 @@ function viewMe() {
     ${s.customTriggers.map((t, i) => `<div class="row plain"><div class="grow t">${esc(t)}</div><button class="icon-btn" data-act="trig-del" data-i="${i}" aria-label="删除 ${esc(t)}">${icon('trash', 18)}</button></div>`).join('')}
   </div>` : ''}
 
+  <div class="group-label"><span>一句话记录</span></div>
+  <div class="group">${row('ai-open', 'sparkle', 'var(--t-sleep)', 'AI 识别（可选）', aiStatus())}</div>
+
   <div class="group-label"><span>数据</span></div>
   <div class="group">
     ${row('report', 'file', 'var(--accent)', '就诊摘要', '近 90 天的头痛、用药和规律，看医生时直接给医生看')}
@@ -827,8 +853,15 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 头痛日记 v1.5</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 晴雨手记 v1.6</div></div></div>
   </div>`;
+}
+
+function aiStatus() {
+  const c = aiConf(state.ai);
+  if (!state.ai.enabled) return '未开启 · 在手机上按规则识别';
+  if (!aiReady(c)) return '已开启，还没填好服务或密钥';
+  return `已开启 · ${esc(c.label)} · ${esc(c.model)}`;
 }
 
 async function updatePersistInfo() {
@@ -895,14 +928,14 @@ const SHEETS = {
     foot: `<button class="btn primary lg block" data-act="a-save">保存</button>`,
   }),
   checkin: s => ({
-    title: `${TILES.find(t => t.k === s.k).label}${s.date === todayKey() ? '' : ' · ' + md(s.date)}`,
+    title: (t => `${t.label} · ${t.plain}`)(TILES.find(t => t.k === s.k)) + (s.date === todayKey() ? '' : ` · ${md(s.date)}`),
     body: editor(s.k, s.date) + (tileValue(s.k, s.date)[0] && s.k !== 'meds' ? `<button class="clear-link" data-act="c-clear" data-k="${s.k}">清除这项记录</button>` : ''),
     foot: doneFoot,
   }),
   day: s => ({
     full: true,
     title: mdw(s.date),
-    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic gl" style="--c:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}</div>${editor(t.k, s.date)}`).join(''),
+    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic gl" style="--c:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}<small>${t.plain}</small></div>${editor(t.k, s.date)}`).join(''),
     foot: doneFoot,
   }),
   factor: s => factorSheet(s.k),
@@ -914,11 +947,214 @@ const SHEETS = {
   categorize: () => ({ full: true, title: '给记录分类', body: categorizeBody(), foot: doneFoot }),
   ifactor: s => ifactorSheet(s.k),
   method: () => ({ full: true, title: '分析方法说明', body: methodBody() }),
+  quick: s => ({ full: true, title: '听到了这些', body: quickBody(s), foot: quickFoot(s) }),
+  ai: () => ({ full: true, title: 'AI 识别', body: aiBody(), foot: doneFoot }),
   report: () => ({
     full: true, title: '就诊摘要',
     body: `<pre class="report">${esc(buildReport())}</pre>`,
     foot: `<div class="btn-row" style="margin:0"><button class="btn tint" data-act="copy-report">${icon('copy', 18)}复制</button><button class="btn primary" data-act="share-report">${icon('share', 18)}分享</button></div>`,
   }),
+};
+
+// ======================= 一句话记录：确认页 =======================
+const Q_TILE = { period: ['period'], diet: ['meal', 'food'], sleep: ['sleep'], mood: ['valence', 'feel', 'factor'], exercise: ['ex', 'exmin', 'exint', 'noex'], meds: ['med'] };
+const Q_STEP = { vas: [1, 1, 10], sleep: [0.5, 0, 16], exmin: [5, 5, 600], valence: [1, 1, 7] };
+const A_ORDER = ['start', 'vas', 'region', 'quality', 'symptom', 'duration', 'trigger', 'med', 'note'];
+const qctx = () => ({ now: new Date(), meds: state.settings.meds, customTriggers: state.settings.customTriggers });
+
+function qChip(s, it) {
+  const i = s.res.items.indexOf(it), cls = `chip qi ${it.on ? 'on' : ''} ${it.fuzzy ? 'fuzzy' : ''}`;
+  const mark = it.fuzzy ? '<i class="q-guess" aria-label="猜测">?</i>' : '';
+  if (Q_STEP[it.k]) {
+    return `<span class="${cls} step"><button data-act="qi-step" data-i="${i}" data-d="-1" aria-label="减少">−</button><button class="q-lbl" data-act="qi-toggle" data-i="${i}" aria-pressed="${it.on}">${mark}${esc(itemText(it))}</button><button data-act="qi-step" data-i="${i}" data-d="1" aria-label="增加">+</button></span>`;
+  }
+  return `<button class="${cls}" data-act="qi-toggle" data-i="${i}" aria-pressed="${it.on}">${mark}${esc(itemText(it))}</button>`;
+}
+// 原话里认出来的部分用颜色标出（AI 结果没有位置信息，就只显示原话）
+function qHighlight(s) {
+  const t = s.text, lv = new Uint8Array(t.length);
+  if (s.source === 'local') {
+    for (const it of s.res.items) {
+      if (!it.on || it.k === 'note' || (it.g === 'a' && !s.attackOn)) continue;
+      for (const [a, b] of it.spans) for (let i = a; i < b && i < t.length; i++) lv[i] = Math.max(lv[i], it.fuzzy ? 1 : 2);
+    }
+  }
+  let out = '';
+  for (let i = 0; i < t.length;) {
+    let j = i;
+    while (j < t.length && lv[j] === lv[i]) j++;
+    const seg = esc(t.slice(i, j));
+    out += lv[i] ? `<mark class="m${lv[i]}">${seg}</mark>` : seg;
+    i = j;
+  }
+  return out;
+}
+function attachDefault(res) {
+  const st = res.items.find(x => x.k === 'start');
+  const ex = attacksOn(st ? st.v.slice(0, 10) : todayKey());
+  return ex.length && (!st || st.noTime) ? ex[0].id : null;
+}
+function aiLine(s) {
+  switch (s.ai) {
+    case 'loading': return `<div class="q-ai"><span class="spin" aria-hidden="true"></span>AI 正在细读这段话……先看看手机上识别的结果</div>`;
+    case 'ready': return `<div class="q-ai">AI 的理解好了<button class="link-btn" data-act="q-use-ai">换成 AI 的结果</button></div>`;
+    case 'done': return `<div class="q-ai">${icon('sparkle', 14, 2)}由 AI 理解<button class="link-btn" data-act="q-use-local">看手机上识别的结果</button></div>`;
+    case 'empty': return '<div class="q-ai">AI 没听出可以记录的内容，下面是手机上识别的结果。</div>';
+    case 'error': return `<div class="q-ai err">AI 没能识别：${esc(s.aiErr)}。下面是手机上识别的结果。<button class="link-btn" data-act="q-retry">重试</button></div>`;
+    default: return state.ai.enabled ? '' : '<div class="q-ai muted">想识别得更准，可以在「我的 → AI 识别」接入自己的 AI。</div>';
+  }
+}
+function quickBody(s) {
+  const items = s.res.items, hasA = items.some(x => x.k === 'head');
+  const A = items.filter(x => x.g === 'a' && x.k !== 'head');
+  const days = [...new Set(items.filter(x => x.g === 'd').map(x => x.date))].sort().reverse();
+  let html = `<section class="card q-said"><h4>你说的<span class="badge ${s.source === 'ai' ? 'accent' : 'flat'}">${s.source === 'ai' ? 'AI 理解' : '手机上识别'}</span></h4>
+    <p class="q-said-text">${qHighlight(s)}</p>${aiLine(s)}</section>`;
+  if (!hasA && !days.length) {
+    return html + `<section class="card"><p class="sub" style="margin:0">没有听出可以记录的内容。可以说说几点开始疼、疼几分、哪里疼、吃了什么药，或者昨晚睡了多久、吃了什么、心情怎样。</p></section>`;
+  }
+  if (hasA) {
+    const st = A.find(x => x.k === 'start'), aDate = st ? st.v.slice(0, 10) : todayKey(), ex = attacksOn(aDate);
+    const generic = A.filter(x => x.k === 'med' && x.on && x.v.generic);
+    const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
+    html += `<section class="card q-sec ${s.attackOn ? '' : 'off'}">
+      <div class="q-h"><span class="gl" style="--c:var(--pain)">${icon('bolt', 15, 2.2)}</span><b>一次头痛</b><small>${dayWord(aDate)}</small>
+        <button class="switch ${s.attackOn ? 'on' : ''}" role="switch" aria-checked="${s.attackOn}" data-act="q-attack" aria-label="记录这次头痛"></button></div>
+      ${!s.attackOn ? '<p class="note" style="margin:0">这次不记头痛，只保存下面的小记。</p>' : `
+      ${ex.length ? `<div class="seg-ctl q-attach"><button class="${!s.attachTo ? 'on' : ''}" data-act="q-attach" data-v="">记为新的一次</button><button class="${s.attachTo === ex[0].id ? 'on' : ''}" data-act="q-attach" data-v="${ex[0].id}">补充到 ${hhmm(new Date(ex[0].start))} 那次</button></div>` : ''}
+      <div class="chips">${A_ORDER.flatMap(k => A.filter(x => x.k === k)).map(it => qChip(s, it)).join('')}</div>
+      ${generic.map(it => `<div class="q-sub"><span>没听清是哪种药，选一下：</span><div class="chips">${presets.map(p => `<button class="chip mini ${it.v.name === p.name ? 'on' : ''}" data-act="qi-med" data-i="${items.indexOf(it)}" data-name="${esc(p.name)}" data-dose="${esc(p.dose)}" data-kind="${p.kind}">${esc(p.name)}</button>`).join('')}</div></div>`).join('')}
+      ${!A.some(x => x.k === 'vas') && !s.attachTo ? '<p class="note">没听出疼痛强度，下一步拖动滑块选一下。</p>' : ''}`}
+    </section>`;
+  }
+  for (const d of days) {
+    const list = items.filter(x => x.g === 'd' && x.date === d);
+    const rows = TILES.map(t => {
+      const its = list.filter(x => Q_TILE[t.k].includes(x.k));
+      return its.length ? `<div class="q-row"><span class="gl" style="--c:${t.color}" title="${t.plain}">${icon(t.ic, 15, 2.2)}</span><div class="chips">${its.map(it => qChip(s, it)).join('')}</div></div>` : '';
+    }).join('');
+    const np = list.filter(x => x.k === 'nopain');
+    html += `<section class="card q-sec"><div class="q-h"><b>${dayWord(d)}的小记</b><small>${md(d)}</small></div>
+      ${np.length ? `<div class="q-row"><span class="gl" style="--c:var(--t-exercise)">${icon('check', 15, 2.4)}</span><div class="chips">${np.map(it => qChip(s, it)).join('')}</div></div>` : ''}${rows}</section>`;
+  }
+  return html + '<p class="note q-legend">点一下可以取消或恢复；带 <i class="q-guess">?</i> 的是猜的，请确认。保存后都还能在原来的地方修改。</p>';
+}
+function quickFoot(s) {
+  const n = s.res.items.filter(x => x.on && x.g === 'd').length, atk = s.attackOn && s.res.items.some(x => x.k === 'head');
+  const label = atk ? (n ? `保存 ${n} 项小记，再确认头痛` : '下一步：确认头痛记录') : n ? `保存 ${n} 项小记` : '没有可保存的内容';
+  return `<button class="btn primary lg block" data-act="q-apply" ${atk || n ? '' : 'disabled style="opacity:.45"'}>${label}</button>`;
+}
+
+async function runAI(s) {
+  s.ai = 'loading'; s.aiErr = null;
+  if (ui.sheet === s) renderSheet();
+  try {
+    const J = await aiParse(aiConf(state.ai), s.text, qctx());
+    const r = fromAI(J, s.text, qctx());
+    if (!r.items.length && s.local.items.length) s.ai = 'empty';
+    else {
+      s.aiRes = r;
+      if (s.edited) s.ai = 'ready';
+      else { s.res = r; s.source = 'ai'; s.ai = 'done'; s.attachTo = attachDefault(r); }
+    }
+  } catch (e) {
+    s.ai = 'error'; s.aiErr = e?.message || String(e);
+  }
+  if (ui.sheet === s) renderSheet();
+}
+
+// 保存：小记直接写进对应日期；有头痛时打开填好的头痛表单，由用户确认后保存
+function applyQuick() {
+  const s = ui.sheet, items = s.res.items.filter(x => x.on);
+  const attackOn = s.attackOn && items.some(x => x.k === 'head');
+  const A = attackOn ? items.filter(x => x.g === 'a') : [];
+  const st = A.find(x => x.k === 'start'), aDate = attackOn ? (st ? st.v.slice(0, 10) : todayKey()) : null;
+  const byDate = {};
+  for (const it of items) if (it.g === 'd') (byDate[it.date] ||= []).push(it);
+  let n = 0;
+  for (const [date, list] of Object.entries(byDate)) {
+    const day = structuredClone(state.days[date] || { date });
+    let extraCaf = 0;
+    const mood = () => { day.mood = { feelings: [], factors: [], ...(day.mood || {}) }; day.mood.feelings ||= []; day.mood.factors ||= []; return day.mood; };
+    for (const it of list) {
+      const v = it.v;
+      switch (it.k) {
+        case 'sleep': day.sleep = v; break;
+        case 'meal': day.meals ||= { b: false, l: false, d: false }; day.meals[v.m] = v.ate; break;
+        case 'food':
+          (day.foods ||= []).push({ id: uid(), cat: v.cat, item: v.item, note: v.note || '' });
+          if (CAFFEINE_ITEMS.includes(v.item) && v.qty > 1) extraCaf += v.qty - 1;
+          break;
+        case 'ex': (day.workouts ||= []).push({ id: uid(), cat: v.cat, item: v.item, note: v.note || '' }); break;
+        case 'exmin': day.exercise = v; break;
+        case 'exint': day.exIntensity = v; break;
+        case 'noex': if (!(day.workouts || []).length) day.exercise = 0; break;
+        case 'valence': mood().valence = v; break;
+        case 'feel': if (!mood().feelings.includes(v)) day.mood.feelings.push(v); break;
+        case 'factor': if (!mood().factors.includes(v)) day.mood.factors.push(v); break;
+        case 'period': day.period = v; break;
+        case 'nopain': if (!attacksOn(date).length && aDate !== date) day.pain = 0; break;
+        case 'med': (day.meds ||= []).push({ id: uid(), name: v.name, dose: v.dose || '', kind: v.kind || 'acute', time: v.time || hhmm(new Date()) }); break;
+      }
+      n++;
+    }
+    if (extraCaf) day.caffeine = Math.max(day.caffeine ?? 0, (day.foods || []).filter(f => CAFFEINE_ITEMS.includes(f.item)).length + extraCaf);
+    saveDay(day);
+  }
+  ui.qeText = '';
+  try { localStorage.removeItem('qe-draft'); } catch { /* ignore */ }
+  if (!attackOn) {
+    closeSheet(true);
+    toast(n ? `已记下 ${n} 项小记` : '没有需要保存的内容');
+    return;
+  }
+  const target = s.attachTo && state.attacks.find(a => a.id === s.attachTo);
+  const d = target ? { ...structuredClone(target), start: toLocalInput(new Date(target.start)) } : newAttackDraft(aDate);
+  if (!target && st) d.start = st.v;
+  d.note ??= '';
+  for (const k of ['regions', 'qualities', 'symptoms', 'triggers', 'meds']) d[k] ||= [];
+  const add = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
+  const start = parseLocal(d.start), sameDay = start.toDateString() === new Date().toDateString();
+  for (const it of A) {
+    const v = it.v;
+    switch (it.k) {
+      case 'vas': d.vas = v; break;
+      case 'region': v.forEach(r => add(d.regions, r)); break;
+      case 'quality': add(d.qualities, v); break;
+      case 'symptom': add(d.symptoms, v); break;
+      case 'trigger': add(d.triggers, v); break;
+      case 'duration': d.duration = v; break;
+      case 'med': d.meds.push({ id: uid(), name: v.name, dose: v.dose || '', time: v.time || (sameDay ? hhmm(new Date()) : hhmm(start)), effect: v.effect ?? null, relief: v.relief ?? null }); break;
+      case 'note': d.note = d.note ? `${d.note}\n${v}` : v; break;
+    }
+  }
+  openSheet({ type: 'attack', draft: d, dirty: true });
+  toast(n ? `已记下 ${n} 项小记，请确认这次头痛` : '已帮你填好，确认后点保存');
+}
+
+// ======================= AI 设置 =======================
+function aiBody() {
+  const a = state.ai, P = AI_PRESETS[a.preset], c = aiConf(a), s = ui.sheet;
+  const f = (id, label, val, extra) => `<label class="f-lbl" for="${id}">${label}</label><input class="field" id="${id}" data-input="${id}" value="${esc(val)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ${extra}>`;
+  return `<section class="card"><div class="switch-row"><span>用 AI 理解我说的话</span><button class="switch ${a.enabled ? 'on' : ''}" role="switch" aria-checked="${!!a.enabled}" data-act="ai-toggle" aria-label="用 AI 理解我说的话"></button></div>
+      <p class="note">不开也能用：手记会在手机上按内置规则识别，不联网。开启后，每次点「帮我记下」会把那段话发给下面选的 AI，口语和模糊的说法理解得更准。</p></section>
+    <section class="card"><h4>AI 服务</h4>
+      <div class="chips">${Object.entries(AI_PRESETS).map(([k, p]) => `<button class="chip ${a.preset === k ? 'on' : ''}" data-act="ai-preset" data-v="${k}" aria-pressed="${a.preset === k}">${p.label}</button>`).join('')}</div>
+      ${P ? `<p class="note">${P.hint}</p>
+        ${f('ai-url', '接口地址', c.url, 'inputmode="url" placeholder="https://…/v1"')}
+        ${f('ai-key', 'API 密钥', c.key, 'type="password" placeholder="粘贴你的密钥"')}
+        ${f('ai-model', '模型', c.model, 'placeholder="模型名称"')}
+        <div class="btn-row"><button class="btn tint" data-act="ai-test" ${s.testing ? 'disabled' : ''}>${s.testing ? '测试中……' : '测试一下'}</button>${c.key ? '<button class="btn" data-act="ai-clear">删除密钥</button>' : ''}</div>
+        ${s.testMsg ? `<p class="note ${s.testOk ? 'ok' : 'err'}">${esc(s.testMsg)}</p>` : ''}`
+      : '<p class="note">先选一个服务。在国内网络下，DeepSeek 和通义千问通常更顺畅。</p>'}
+    </section>
+    <section class="card"><h4>隐私与费用</h4><p class="sub">密钥只保存在这台手机上，不会出现在导出的备份里。发给 AI 的只有你这次输入的那段话和选项清单，不包含其他任何记录；服务商会按自己的隐私政策处理。调用按服务商的价格计费。</p></section>`;
+}
+const aiField = (k, v) => {
+  const c = (state.ai.cfg[state.ai.preset] ||= {});
+  c[k] = v;
+  clearTimeout(INPUTS.at);
+  INPUTS.at = setTimeout(saveAI, 300);
 };
 
 function vasWidget(v) {
@@ -1287,7 +1523,7 @@ function buildReport() {
     lines.push(`${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)} 强度${vasOf(a)} ${a.duration ? durationOf(a.duration).label : ''} ${regionSummary(a)} ${(a.qualities || []).join('、')} ${(a.symptoms || []).join('、')}${meds ? ' | ' + meds : ''}`.replace(/\s+/g, ' ').trim());
   }
   if (!list.length) lines.push('（无）');
-  lines.push('', '由「头痛日记」生成，仅供参考。');
+  lines.push('', '由「晴雨手记」生成，仅供参考。');
   return lines.join('\n');
 }
 
@@ -1326,18 +1562,18 @@ function exportCSV() {
         (a.qualities || []).join('/'), (a.symptoms || []).join('/'), (a.triggers || []).join('/'), meds, ...daily, a.note].map(q).join(','));
     }
   }
-  shareOrDownload(`头痛日记-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
+  shareOrDownload(`晴雨手记-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
 }
 
 function exportJSON() {
   const data = { app: 'migraine-diary', version: 2, exportedAt: new Date().toISOString(), attacks: state.attacks, days: Object.values(state.days), settings: state.settings };
-  shareOrDownload(`头痛日记备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
+  shareOrDownload(`晴雨手记备份-${todayKey()}.json`, JSON.stringify(data, null, 1), 'application/json');
 }
 
 async function importJSON(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { return toast('文件格式不对，无法读取'); }
-  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是头痛日记的备份文件');
+  if (!data || !Array.isArray(data.attacks) || !Array.isArray(data.days)) return toast('这不是晴雨手记的备份文件');
   const attacks = data.attacks.filter(a => a && a.id && a.start && (a.vas || a.severity)).map(normalizeAttack);
   const days = data.days.filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(d.date));
   if (!confirm(`将导入 ${attacks.length} 次头痛、${days.length} 天打卡，并与现有记录合并（相同的记录以备份为准）。继续吗？`)) return;
@@ -1377,6 +1613,54 @@ const touch = () => { ui.sheet.dirty = true; renderSheet(); };
 
 const ACTIONS = {
   tab: el => { ui.tab = el.dataset.tab; render(); },
+
+  // ---- 一句话记录 ----
+  'qe-parse': () => {
+    const text = (ui.qeText || '').trim();
+    if (!text) { document.querySelector('.qe-text')?.focus(); return toast('先写一句，或点键盘上的麦克风说一句'); }
+    const res = parseText(text, qctx());
+    const s = { type: 'quick', text, res, local: res, source: 'local', attackOn: true, attachTo: attachDefault(res), ai: null, edited: false, dirty: false };
+    openSheet(s);
+    if (aiReady(aiConf(state.ai))) runAI(s);
+  },
+  'qi-toggle': el => { const it = ui.sheet.res.items[+el.dataset.i]; it.on = !it.on; ui.sheet.edited = true; renderSheet(); },
+  'qi-step': el => {
+    const it = ui.sheet.res.items[+el.dataset.i], [st, lo, hi] = Q_STEP[it.k];
+    it.v = Math.max(lo, Math.min(hi, +(it.v + st * +el.dataset.d).toFixed(1)));
+    it.on = true; it.fuzzy = false; ui.sheet.edited = true; renderSheet();
+  },
+  'qi-med': el => {
+    const it = ui.sheet.res.items[+el.dataset.i];
+    Object.assign(it.v, { name: el.dataset.name, dose: el.dataset.dose, kind: el.dataset.kind, generic: false });
+    it.fuzzy = false; it.on = true; ui.sheet.edited = true; renderSheet();
+  },
+  'q-attack': () => { ui.sheet.attackOn = !ui.sheet.attackOn; ui.sheet.edited = true; renderSheet(); },
+  'q-attach': el => { ui.sheet.attachTo = el.dataset.v || null; renderSheet(); },
+  'q-use-ai': () => { const s = ui.sheet; s.res = s.aiRes; s.source = 'ai'; s.ai = 'done'; s.attachTo = attachDefault(s.res); renderSheet(); },
+  'q-use-local': () => { const s = ui.sheet; s.res = s.local; s.source = 'local'; s.ai = 'ready'; s.attachTo = attachDefault(s.res); renderSheet(); },
+  'q-retry': () => runAI(ui.sheet),
+  'q-apply': () => applyQuick(),
+  'ai-open': () => openSheet({ type: 'ai' }),
+  'ai-toggle': () => { state.ai.enabled = !state.ai.enabled; saveAI(); renderSheet(); },
+  'ai-preset': el => { state.ai.preset = el.dataset.v; state.ai.cfg[el.dataset.v] ||= {}; ui.sheet.testMsg = null; saveAI(); renderSheet(); },
+  'ai-clear': () => {
+    if (!confirm('删除这个服务的密钥？')) return;
+    state.ai.cfg[state.ai.preset].key = ''; saveAI(); ui.sheet.testMsg = null; renderSheet();
+  },
+  'ai-test': async () => {
+    const c = aiConf(state.ai), s = ui.sheet;
+    if (!c?.url || !c.key || !c.model) return toast('请先填好接口地址、密钥和模型');
+    s.testing = true; s.testMsg = null; renderSheet();
+    const sample = '下午三点左边太阳穴一跳一跳地疼，大概 6 分，吃了布洛芬，半小时后好多了';
+    try {
+      const r = fromAI(await aiParse(c, sample, qctx()), sample, qctx());
+      const n = r.items.filter(x => x.k !== 'head' && x.k !== 'note').length;
+      s.testOk = n > 0;
+      s.testMsg = n ? `连接成功，从示例句子里识别出 ${n} 项。` : '连上了，但没有识别出内容，可以换个模型试试。';
+    } catch (e) { s.testOk = false; s.testMsg = e?.message || String(e); }
+    s.testing = false;
+    if (ui.sheet === s) renderSheet();
+  },
   'hide-install': () => { state.settings.hideInstall = true; saveSettings(); render(); },
 
   'no-pain': () => {
@@ -1582,6 +1866,7 @@ const ACTIONS = {
     await db.clearAll();
     state.attacks = []; state.days = {};
     state.settings = { name: '', meds: DEFAULT_MEDS.map(m => ({ ...m })), customTriggers: [], hideInstall: state.settings.hideInstall };
+    state.ai = AI_DEFAULT();
     saveSettings(); afterWrite(); render();
     toast('已清除');
   },
@@ -1596,6 +1881,16 @@ function addLog(kind, cat, item) {
 }
 
 const INPUTS = {
+  'qe-text': el => {
+    ui.qeText = el.value;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight + 2, 280)}px`;
+    clearTimeout(INPUTS.qt);
+    INPUTS.qt = setTimeout(() => { try { localStorage.setItem('qe-draft', ui.qeText); } catch { /* ignore */ } }, 400);
+  },
+  'ai-url': el => aiField('url', el.value),
+  'ai-key': el => aiField('key', el.value),
+  'ai-model': el => aiField('model', el.value),
   'log-note': el => {
     const f = LOGS[el.dataset.kind].field, id = el.dataset.id, v = el.value;
     clearTimeout(INPUTS.ln);
