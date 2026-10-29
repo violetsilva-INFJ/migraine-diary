@@ -1,5 +1,5 @@
 // 离线缓存：先走网络（拿到最新版本），断网时用缓存。
-const CACHE = 'migraine-diary-v9';
+const CACHE = 'migraine-diary-v10';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/db.js', './js/stats.js', './js/util.js', './js/headmap.js', './js/parse.js', './js/ai.js',

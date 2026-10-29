@@ -8,7 +8,7 @@ import {
 } from './util.js';
 import { headSVG, VIEWS, VIEW_REGIONS } from './headmap.js';
 import * as S from './stats.js';
-import { parseText, fromAI, itemText, dayWord } from './parse.js';
+import { fromAI, itemText, dayWord } from './parse.js';
 import { AI_PRESETS, aiConf, aiReady, aiParse } from './ai.js';
 
 // ======================= 状态 =======================
@@ -19,7 +19,7 @@ const state = {
 };
 const ui = { tab: 'home', prevTab: null, month: startOfMonth(new Date()), sel: todayKey(), sheet: null, qeText: '' };
 // AI 识别的设置（含密钥）单独存放，不放进 settings，所以不会跟着备份导出
-const AI_DEFAULT = () => ({ enabled: false, preset: null, cfg: {} });
+const AI_DEFAULT = () => ({ preset: null, cfg: {} });
 state.ai = AI_DEFAULT();
 try { ui.qeText = localStorage.getItem('qe-draft') || ''; } catch { /* 无痕模式等 */ }
 let cache = null;
@@ -192,14 +192,13 @@ const counted = (v, dec = 0) => v == null || !isFinite(v) ? '—' : `<span data-
 const header = (eyebrow, title, right = '') => `<header class="top"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1></div>${right}</header>`;
 
 // ----------------------- 今天 -----------------------
-// 小记的六个格子：文艺的名字 + 旁边小字写明是什么
 const TILES = [
-  { k: 'period', label: '月汐', plain: '经期', ic: 'drop', color: 'var(--t-period)' },
-  { k: 'diet', label: '食光', plain: '饮食', ic: 'bowl', color: 'var(--t-diet)' },
-  { k: 'sleep', label: '入梦', plain: '睡眠', ic: 'sleep', color: 'var(--t-sleep)' },
-  { k: 'mood', label: '心晴', plain: '心情', ic: 'heart', color: 'var(--t-stress)' },
-  { k: 'exercise', label: '舒展', plain: '运动', ic: 'stretch', color: 'var(--t-exercise)' },
-  { k: 'meds', label: '药笺', plain: '服药', ic: 'pill', color: 'var(--t-meds)' },
+  { k: 'period', label: '经期', ic: 'drop', color: 'var(--t-period)' },
+  { k: 'diet', label: '饮食', ic: 'bowl', color: 'var(--t-diet)' },
+  { k: 'sleep', label: '睡眠', ic: 'sleep', color: 'var(--t-sleep)' },
+  { k: 'mood', label: '心情', ic: 'heart', color: 'var(--t-stress)' },
+  { k: 'exercise', label: '运动', ic: 'stretch', color: 'var(--t-exercise)' },
+  { k: 'meds', label: '服药', ic: 'pill', color: 'var(--t-meds)' },
 ];
 
 function tileValue(k, date) {
@@ -271,18 +270,6 @@ function heroCard() {
   </section>`;
 }
 
-// 一句话记录：用键盘上的语音输入说一段，识别成选项，确认后填好
-function quickCard() {
-  const on = aiReady(aiConf(state.ai));
-  return `<section class="card qe">
-    <div class="qe-head"><span class="gl" style="--c:var(--accent)">${icon('mic', 18, 2.1)}</span>
-      <div class="grow"><b>说给手记听</b><span>点键盘上的麦克风说一段，我来帮你分好类</span></div></div>
-    <textarea class="field qe-text" data-input="qe-text" rows="3" aria-label="用一段话描述今天的情况" placeholder="比如：下午三点左边太阳穴跳着疼，大概 6 分，吃了布洛芬；昨晚只睡了 5 小时。">${esc(ui.qeText)}</textarea>
-    <div class="qe-foot"><span class="qe-mode">${on ? `${icon('sparkle', 14, 2)}AI 理解已开启` : '在手机上识别，不联网'}</span>
-      <button class="btn primary" data-act="qe-parse">${icon('sparkle', 17, 2)}帮我记下</button></div>
-  </section>`;
-}
-
 function viewHome() {
   const now = new Date(), tk = todayKey();
   const h = now.getHours();
@@ -293,10 +280,10 @@ function viewHome() {
   return `
   ${header(`${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`, `${greet}${name ? '，' + esc(name) : ''}`,
     `<div class="top-actions">${streak >= 2 ? `<span class="streak">${icon('sun', 15, 2)}${streak} 天</span>` : ''}
+      <button class="ai-pill" data-act="ai-quick" aria-label="用一段话让 AI 帮你记录">${icon('sparkle', 14, 2)}AI 记录</button>
       <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}
   ${installBanner()}
   ${heroCard()}
-  ${quickCard()}
   <div class="sec"><h2>今日小记</h2>
     <svg class="check-ring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" style="stroke:var(--fill-2)" stroke-width="3"/>
       ${done ? `<circle class="val" cx="11" cy="11" r="9" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(done / 6 * 56.5).toFixed(1)} 56.5"/>` : ''}</svg>
@@ -304,8 +291,8 @@ function viewHome() {
   <div class="grid3">
     ${TILES.map(t => {
       const [ok, text] = tileValue(t.k, tk);
-      return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.plain}：${esc(text)}">
-        <span class="gl" style="--c:${t.color}">${icon(t.ic, 22, 1.8)}</span><b>${t.label}<small>${t.plain}</small></b><span class="val">${esc(text)}</span>
+      return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.label}：${esc(text)}">
+        <span class="gl" style="--c:${t.color}">${icon(t.ic, 22, 1.8)}</span><b>${t.label}</b><span class="val">${esc(text)}</span>
         ${ok ? `<i class="tick">${icon('check', 12, 3.2)}</i>` : ''}</button>`;
     }).join('')}
   </div>
@@ -837,7 +824,7 @@ function viewMe() {
   </div>` : ''}
 
   <div class="group-label"><span>一句话记录</span></div>
-  <div class="group">${row('ai-open', 'sparkle', 'var(--t-sleep)', 'AI 识别（可选）', aiStatus())}</div>
+  <div class="group">${row('ai-open', 'sparkle', 'var(--t-sleep)', 'AI 记录（可选）', aiStatus())}</div>
 
   <div class="group-label"><span>数据</span></div>
   <div class="group">
@@ -853,15 +840,13 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.6.2</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.7</div></div></div>
   </div>`;
 }
 
 function aiStatus() {
   const c = aiConf(state.ai);
-  if (!state.ai.enabled) return '未开启 · 在手机上按规则识别';
-  if (!aiReady(c)) return '已开启，还没填好服务或密钥';
-  return `已开启 · ${esc(c.label)} · ${esc(c.model)}`;
+  return aiReady(c) ? `已设置 · ${esc(c.label)} · ${esc(c.model)}` : '未设置 · 设置后可以在首页用一段话记录';
 }
 
 async function updatePersistInfo() {
@@ -928,14 +913,14 @@ const SHEETS = {
     foot: `<button class="btn primary lg block" data-act="a-save">保存</button>`,
   }),
   checkin: s => ({
-    title: (t => `${t.label} · ${t.plain}`)(TILES.find(t => t.k === s.k)) + (s.date === todayKey() ? '' : ` · ${md(s.date)}`),
+    title: `${TILES.find(t => t.k === s.k).label}${s.date === todayKey() ? '' : ' · ' + md(s.date)}`,
     body: editor(s.k, s.date) + (tileValue(s.k, s.date)[0] && s.k !== 'meds' ? `<button class="clear-link" data-act="c-clear" data-k="${s.k}">清除这项记录</button>` : ''),
     foot: doneFoot,
   }),
   day: s => ({
     full: true,
     title: mdw(s.date),
-    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic gl" style="--c:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}<small>${t.plain}</small></div>${editor(t.k, s.date)}`).join(''),
+    body: TILES.map(t => `<div class="sheet-sec"><span class="li-ic gl" style="--c:${t.color}">${icon(t.ic, 16, 2)}</span>${t.label}</div>${editor(t.k, s.date)}`).join(''),
     foot: doneFoot,
   }),
   factor: s => factorSheet(s.k),
@@ -948,7 +933,8 @@ const SHEETS = {
   ifactor: s => ifactorSheet(s.k),
   method: () => ({ full: true, title: '分析方法说明', body: methodBody() }),
   quick: s => ({ full: true, title: '听到了这些', body: quickBody(s), foot: quickFoot(s) }),
-  ai: () => ({ full: true, title: 'AI 识别', body: aiBody(), foot: doneFoot }),
+  aiq: s => ({ title: 'AI 记录', body: aiqBody(s), foot: aiqFoot(s) }),
+  ai: () => ({ full: true, title: 'AI 记录设置', body: aiBody(), foot: doneFoot }),
   report: () => ({
     full: true, title: '就诊摘要',
     body: `<pre class="report">${esc(buildReport())}</pre>`,
@@ -974,48 +960,19 @@ function qChip(s, it) {
   }
   return `<button class="${cls}" data-act="qi-toggle" data-i="${i}" aria-pressed="${it.on}">${mark}${esc(itemText(it))}</button>`;
 }
-// 原话里认出来的部分用颜色标出（AI 结果没有位置信息，就只显示原话）
-function qHighlight(s) {
-  const t = s.text, lv = new Uint8Array(t.length);
-  if (s.source === 'local') {
-    for (const it of s.res.items) {
-      if (!it.on || it.k === 'note' || (it.g === 'a' && !s.attackOn)) continue;
-      for (const [a, b] of it.spans) for (let i = a; i < b && i < t.length; i++) lv[i] = Math.max(lv[i], it.fuzzy ? 1 : 2);
-    }
-  }
-  let out = '';
-  for (let i = 0; i < t.length;) {
-    let j = i;
-    while (j < t.length && lv[j] === lv[i]) j++;
-    const seg = esc(t.slice(i, j));
-    out += lv[i] ? `<mark class="m${lv[i]}">${seg}</mark>` : seg;
-    i = j;
-  }
-  return out;
-}
 function attachDefault(res) {
   const st = res.items.find(x => x.k === 'start');
   const ex = attacksOn(st ? st.v.slice(0, 10) : todayKey());
   return ex.length && (!st || st.noTime) ? ex[0].id : null;
 }
-function aiLine(s) {
-  switch (s.ai) {
-    case 'loading': return `<div class="q-ai"><span class="spin" aria-hidden="true"></span>AI 正在细读这段话……先看看手机上识别的结果</div>`;
-    case 'ready': return `<div class="q-ai">AI 的理解好了<button class="link-btn" data-act="q-use-ai">换成 AI 的结果</button></div>`;
-    case 'done': return `<div class="q-ai">${icon('sparkle', 14, 2)}由 AI 理解<button class="link-btn" data-act="q-use-local">看手机上识别的结果</button></div>`;
-    case 'empty': return '<div class="q-ai">AI 没听出可以记录的内容，下面是手机上识别的结果。</div>';
-    case 'error': return `<div class="q-ai err">AI 没能识别：${esc(s.aiErr)}。下面是手机上识别的结果。<button class="link-btn" data-act="q-retry">重试</button></div>`;
-    default: return state.ai.enabled ? '' : '<div class="q-ai muted">想识别得更准，可以在「我的 → AI 识别」接入自己的 AI。</div>';
-  }
-}
 function quickBody(s) {
   const items = s.res.items, hasA = items.some(x => x.k === 'head');
   const A = items.filter(x => x.g === 'a' && x.k !== 'head');
   const days = [...new Set(items.filter(x => x.g === 'd').map(x => x.date))].sort().reverse();
-  let html = `<section class="card q-said"><h4>你说的<span class="badge ${s.source === 'ai' ? 'accent' : 'flat'}">${s.source === 'ai' ? 'AI 理解' : '手机上识别'}</span></h4>
-    <p class="q-said-text">${qHighlight(s)}</p>${aiLine(s)}</section>`;
+  let html = `<section class="card q-said"><h4>你说的<span class="badge accent">AI 理解</span></h4>
+    <p class="q-said-text">${esc(s.text)}</p></section>`;
   if (!hasA && !days.length) {
-    return html + `<section class="card"><p class="sub" style="margin:0">没有听出可以记录的内容。可以说说几点开始疼、疼几分、哪里疼、吃了什么药，或者昨晚睡了多久、吃了什么、心情怎样。</p></section>`;
+    return html + `<section class="card"><p class="sub" style="margin:0">AI 没有听出可以记录的内容。可以说说几点开始疼、疼几分、哪里疼、吃了什么药，或者昨晚睡了多久、吃了什么、心情怎样。</p></section>`;
   }
   if (hasA) {
     const st = A.find(x => x.k === 'start'), aDate = st ? st.v.slice(0, 10) : todayKey(), ex = attacksOn(aDate);
@@ -1030,14 +987,14 @@ function quickBody(s) {
       ${generic.map(it => `<div class="q-sub"><span>没听清是哪种药，选一下：</span><div class="chips">${presets.map(p => `<button class="chip mini ${it.v.name === p.name ? 'on' : ''}" data-act="qi-med" data-i="${items.indexOf(it)}" data-name="${esc(p.name)}" data-dose="${esc(p.dose)}" data-kind="${p.kind}">${esc(p.name)}</button>`).join('')}</div></div>`).join('')}
       ${(s.res.notes || []).map(n => `<p class="note">${esc(n)}</p>`).join('')}
       ${!A.some(x => x.k === 'vas') && !s.attachTo && !(s.res.notes || []).length ? '<p class="note">没听出疼痛强度，下一步拖动滑块选一下。</p>' : ''}
-      ${A.some(x => x.k === 'vas' && (x.phrase || x.cmp)) ? '<p class="note">分数是按你的说法估的：有点疼≈3，比较痛≈5，很疼≈7，疼得受不了≈9；和别的时候比的，按那次记录加减。用 − / + 调到合适的分数。</p>' : ''}`}
+      ${A.some(x => x.k === 'vas' && (x.phrase || x.cmp)) ? '<p class="note">分数是按你的说法估的；和别的时候比的，按那次的记录加减。用 − / + 调到合适的分数。</p>' : ''}`}
     </section>`;
   }
   for (const d of days) {
     const list = items.filter(x => x.g === 'd' && x.date === d);
     const rows = TILES.map(t => {
       const its = list.filter(x => Q_TILE[t.k].includes(x.k));
-      return its.length ? `<div class="q-row"><span class="gl" style="--c:${t.color}" title="${t.plain}">${icon(t.ic, 15, 2.2)}</span><div class="chips">${its.map(it => qChip(s, it)).join('')}</div></div>` : '';
+      return its.length ? `<div class="q-row"><span class="gl" style="--c:${t.color}" title="${t.label}">${icon(t.ic, 15, 2.2)}</span><div class="chips">${its.map(it => qChip(s, it)).join('')}</div></div>` : '';
     }).join('');
     const np = list.filter(x => x.k === 'nopain');
     html += `<section class="card q-sec"><div class="q-h"><b>${dayWord(d)}的小记</b><small>${md(d)}</small></div>
@@ -1049,24 +1006,6 @@ function quickFoot(s) {
   const n = s.res.items.filter(x => x.on && x.g === 'd').length, atk = s.attackOn && s.res.items.some(x => x.k === 'head');
   const label = atk ? (n ? `保存 ${n} 项小记，再确认头痛` : '下一步：确认头痛记录') : n ? `保存 ${n} 项小记` : '没有可保存的内容';
   return `<button class="btn primary lg block" data-act="q-apply" ${atk || n ? '' : 'disabled style="opacity:.45"'}>${label}</button>`;
-}
-
-async function runAI(s) {
-  s.ai = 'loading'; s.aiErr = null;
-  if (ui.sheet === s) renderSheet();
-  try {
-    const J = await aiParse(aiConf(state.ai), s.text, qctx());
-    const r = fromAI(J, s.text, qctx());
-    if (!r.items.length && s.local.items.length) s.ai = 'empty';
-    else {
-      s.aiRes = r;
-      if (s.edited) s.ai = 'ready';
-      else { s.res = r; s.source = 'ai'; s.ai = 'done'; s.attachTo = attachDefault(r); }
-    }
-  } catch (e) {
-    s.ai = 'error'; s.aiErr = e?.message || String(e);
-  }
-  if (ui.sheet === s) renderSheet();
 }
 
 // 保存：小记直接写进对应日期；有头痛时打开填好的头痛表单，由用户确认后保存
@@ -1144,12 +1083,31 @@ function applyQuick() {
   toast(n ? `已记下 ${n} 项小记，请确认这次头痛` : '已帮你填好，确认后点保存');
 }
 
+// ======================= AI 记录（输入一段话） =======================
+function aiqBody(s) {
+  const c = aiConf(state.ai);
+  if (!aiReady(c)) {
+    return `<section class="card"><p class="sub" style="margin:0">用一段话说说头痛和今天的情况，AI 会帮你选好对应的选项，你确认后再保存。</p>
+      <p class="note">需要先接入你自己的 AI 服务（DeepSeek、通义千问、Claude 等），在「我的 → AI 记录」里设置。</p></section>`;
+  }
+  return `<section class="card">
+      <textarea class="field qe-text" data-input="qe-text" rows="6" aria-label="用一段话描述头痛和今天的情况" placeholder="比如：下午三点左边太阳穴跳着疼，比昨天轻一点，吃了布洛芬，半小时后好点了；昨晚只睡了 5 小时，中午喝了杯奶茶。" ${s.busy ? 'disabled' : ''}>${esc(ui.qeText)}</textarea>
+      <p class="note">点键盘上的麦克风就能用语音输入。发给 ${esc(c.label)} 的只有这段话，识别结果会先给你确认。</p>
+      ${s.err ? `<div class="q-ai err">AI 没能识别：${esc(s.err)}</div>` : ''}
+    </section>`;
+}
+function aiqFoot(s) {
+  if (!aiReady(aiConf(state.ai))) return `<button class="btn primary lg block" data-act="ai-open">去设置 AI</button>`;
+  return s.busy
+    ? `<button class="btn primary lg block" disabled><span class="spin light" aria-hidden="true"></span>AI 正在理解……</button>`
+    : `<button class="btn primary lg block" data-act="aiq-send">${icon('sparkle', 18, 2)}交给 AI 识别</button>`;
+}
+
 // ======================= AI 设置 =======================
 function aiBody() {
   const a = state.ai, P = AI_PRESETS[a.preset], c = aiConf(a), s = ui.sheet;
   const f = (id, label, val, extra) => `<label class="f-lbl" for="${id}">${label}</label><input class="field" id="${id}" data-input="${id}" value="${esc(val)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ${extra}>`;
-  return `<section class="card"><div class="switch-row"><span>用 AI 理解我说的话</span><button class="switch ${a.enabled ? 'on' : ''}" role="switch" aria-checked="${!!a.enabled}" data-act="ai-toggle" aria-label="用 AI 理解我说的话"></button></div>
-      <p class="note">不开也能用：手记会在手机上按内置规则识别，不联网。开启后，每次点「帮我记下」会把那段话发给下面选的 AI，口语和模糊的说法理解得更准。</p></section>
+  return `<section class="card"><p class="sub" style="margin:0">设置好后，在首页点「AI 记录」，用一段话说说头痛和今天的情况，AI 会帮你选好选项，你确认后再保存。需要你自己的 AI 服务密钥。</p></section>
     <section class="card"><h4>AI 服务</h4>
       <div class="chips">${Object.entries(AI_PRESETS).map(([k, p]) => `<button class="chip ${a.preset === k ? 'on' : ''}" data-act="ai-preset" data-v="${k}" aria-pressed="${a.preset === k}">${p.label}</button>`).join('')}</div>
       ${P ? `<p class="note">${P.hint}</p>
@@ -1626,14 +1584,20 @@ const touch = () => { ui.sheet.dirty = true; renderSheet(); };
 const ACTIONS = {
   tab: el => { ui.tab = el.dataset.tab; render(); },
 
-  // ---- 一句话记录 ----
-  'qe-parse': () => {
-    const text = (ui.qeText || '').trim();
-    if (!text) { document.querySelector('.qe-text')?.focus(); return toast('先写一句，或点键盘上的麦克风说一句'); }
-    const res = parseText(text, qctx());
-    const s = { type: 'quick', text, res, local: res, source: 'local', attackOn: true, attachTo: attachDefault(res), ai: null, edited: false, dirty: false };
-    openSheet(s);
-    if (aiReady(aiConf(state.ai))) runAI(s);
+  // ---- AI 记录 ----
+  'ai-quick': () => openSheet({ type: 'aiq' }),
+  'aiq-send': async () => {
+    const s = ui.sheet, text = (ui.qeText || '').trim();
+    if (!text) { $sheet.querySelector('.qe-text')?.focus(); return toast('先写一句，或点键盘上的麦克风说一句'); }
+    s.busy = true; s.err = null; renderSheet();
+    try {
+      const res = fromAI(await aiParse(aiConf(state.ai), text, qctx()), text, qctx());
+      if (ui.sheet !== s) return;
+      openSheet({ type: 'quick', text, res, attackOn: true, attachTo: attachDefault(res), edited: false, dirty: false });
+    } catch (e) {
+      s.busy = false; s.err = e?.message || String(e);
+      if (ui.sheet === s) renderSheet();
+    }
   },
   'qi-toggle': el => { const it = ui.sheet.res.items[+el.dataset.i]; it.on = !it.on; ui.sheet.edited = true; renderSheet(); },
   'qi-step': el => {
@@ -1648,12 +1612,8 @@ const ACTIONS = {
   },
   'q-attack': () => { ui.sheet.attackOn = !ui.sheet.attackOn; ui.sheet.edited = true; renderSheet(); },
   'q-attach': el => { ui.sheet.attachTo = el.dataset.v || null; renderSheet(); },
-  'q-use-ai': () => { const s = ui.sheet; s.res = s.aiRes; s.source = 'ai'; s.ai = 'done'; s.attachTo = attachDefault(s.res); renderSheet(); },
-  'q-use-local': () => { const s = ui.sheet; s.res = s.local; s.source = 'local'; s.ai = 'ready'; s.attachTo = attachDefault(s.res); renderSheet(); },
-  'q-retry': () => runAI(ui.sheet),
   'q-apply': () => applyQuick(),
   'ai-open': () => openSheet({ type: 'ai' }),
-  'ai-toggle': () => { state.ai.enabled = !state.ai.enabled; saveAI(); renderSheet(); },
   'ai-preset': el => { state.ai.preset = el.dataset.v; state.ai.cfg[el.dataset.v] ||= {}; ui.sheet.testMsg = null; saveAI(); renderSheet(); },
   'ai-clear': () => {
     if (!confirm('删除这个服务的密钥？')) return;

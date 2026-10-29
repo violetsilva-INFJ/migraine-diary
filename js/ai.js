@@ -16,9 +16,9 @@ export function aiConf(ai) {
   const P = AI_PRESETS[ai?.preset];
   if (!P) return null;
   const c = ai.cfg?.[ai.preset] || {};
-  return { enabled: !!ai.enabled, kind: P.kind, label: P.label, url: (c.url ?? P.url).trim(), key: (c.key || '').trim(), model: (c.model ?? P.model).trim() };
+  return { kind: P.kind, label: P.label, url: (c.url ?? P.url).trim(), key: (c.key || '').trim(), model: (c.model ?? P.model).trim() };
 }
-export const aiReady = c => !!(c && c.enabled && c.key && c.url && c.model);
+export const aiReady = c => !!(c && c.key && c.url && c.model);
 
 // ---------- 输出结构 ----------
 const nul = t => ({ anyOf: [t, { type: 'null' }] });
