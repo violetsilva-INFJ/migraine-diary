@@ -765,27 +765,21 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
    位置只用最基本的写法（底边对齐、宽度 100%），各家浏览器画出来都一样 */
 .v-home > .home-sky { z-index: 0; margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: 44px 16px 84px; }
 .bleed .v-home > .home-sky { padding-top: calc(var(--safe-t) + 14px); }
-/* 画分两层：外面一层不动，只管上沿淡出（后面垫着「更多的天空」）；里面一层是画本身，展开 / 收起时跟着面板滑动 */
-.sky-clip {
-  position: absolute; z-index: -1; top: 0; left: 0; right: 0; bottom: -28px; pointer-events: none;
-  -webkit-mask-image: linear-gradient(transparent, #000 34px); mask-image: linear-gradient(transparent, #000 34px);
-}
-.bleed .sky-clip { -webkit-mask-image: none; mask-image: none; }
+/* 画分两层：外面一层不动，里面一层是画本身，展开 / 收起时跟着面板滑动 */
+.sky-clip { position: absolute; z-index: -1; top: 0; left: 0; right: 0; bottom: -28px; pointer-events: none; }
 .sky-art {
   position: absolute; top: -90px; left: 0; right: 0; bottom: 0;
   background: #C9C3F1 url(../img/home-sky.jpg) 50% 100% / 100% auto no-repeat;
   -webkit-mask-image: linear-gradient(#000 calc(100% - 30px), transparent); mask-image: linear-gradient(#000 calc(100% - 30px), transparent);
 }
-/* 用力下拉首页时（iOS 的回弹），画上面露出来的还是天：一层固定在屏幕顶上的、只有天空笔触的图。
+/* 用力下拉首页时（iOS 的回弹），画上面露出来的是和状态栏一样的天色：一层固定在屏幕顶上的纯色。
    为了让它只在画的上方露出来，首页的纸分成两块：上半块跟着内容一起动（.v-home::before，从画的上沿下面一点开始），
    下半块固定不动（body::after，只留屏幕下半截），这样往下拉、往上推都不会露出别的颜色 */
-.sky-more {
-  display: none; position: fixed; z-index: -1; top: 0; left: 0; right: 0; height: 56vh; pointer-events: none;
-  background: var(--zenith) url(../img/sky-more.jpg) 50% 0 / 100% auto repeat-y;
-}
+.sky-more { display: none; position: fixed; z-index: -1; top: 0; left: 0; right: 0; height: 56vh; pointer-events: none; background: var(--zenith); }
 @media (max-width: 480px) {
   html:not(.bleed)[data-tab="home"] .sky-more { display: block; }
   html:not(.bleed)[data-tab="home"] body::after { top: 55vh; }
+  html:not(.bleed)[data-tab="home"] body::before { display: none; }  /* 首页不要顶上那几团淡彩，不然下拉露出的天色会不匀 */
   html:not(.bleed) .v-home::before { content: ""; position: absolute; z-index: -1; top: 60px; bottom: 0; left: 0; right: 0; background: var(--texture), var(--bg); pointer-events: none; }
 }
 .bleed .home-sky::after {
@@ -793,10 +787,7 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
   background: linear-gradient(var(--zenith) calc(var(--safe-t) * .35), var(--zenith-half) calc(var(--safe-t) + 4px), transparent);
 }
 /* 深色模式：换成暮色的那一幅（太阳还亮着） */
-@media (prefers-color-scheme: dark) {
-  .sky-art { background-color: #656284; background-image: url(../img/home-sky-dark.jpg); }
-  .sky-more { background-image: url(../img/sky-more-dark.jpg); }
-}
+@media (prefers-color-scheme: dark) { .sky-art { background-color: #656284; background-image: url(../img/home-sky-dark.jpg); } }
 /* 其他页面全屏时：状态栏后面垫一条同一片天，下面的页面像一张圆角的纸从天底下露出来 */
 .cap {
   display: none; position: fixed; z-index: 35; top: 0; left: 0; right: 0; height: calc(var(--safe-t) + 20px); pointer-events: none;
@@ -928,6 +919,9 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 }
 .wheel::-webkit-scrollbar { display: none; }
 .wheel.wide { flex: 1 1 auto; }
+.wheels.w3 .wheel { flex-basis: 76px; }
+.wheels.w3 .wheel.wday { flex-basis: 86px; }
+.wheel.wday .wh-i { font-size: 18px; font-family: inherit; }
 .wh-pad { height: 80px; }
 .wh-i {
   display: block; width: 100%; height: 40px; line-height: 40px; text-align: center; scroll-snap-align: center;

@@ -258,13 +258,12 @@ const AGO = [[0, '刚刚'], [30, '半小时前'], [60, '1 小时前'], [120, '2 
 const pad2 = n => String(n).padStart(2, '0');
 // 时间选择（开始时间和每种药的服药时间共用）：who 是 '@start' 或药名
 const timeOf = (t, who) => who === '@start' ? (t.a.start.split('T')[1] || '') : (t.a.meds.find(m => m.name === who)?.time || '');
-function setTimeOf(t, who, time) {
-  // 今天还没到的时间不能选：超过现在就按现在算
-  const now = hhmm(new Date());
-  if (time > now) time = now;
-  if (who === '@start') t.a.start = `${t.a.start.split('T')[0]}T${time}`;
-  else { const m = t.a.meds.find(x => x.name === who); if (m) m.time = time; }
-}
+function setTimeOf(t, who, time) { const m = t.a.meds.find(x => x.name === who); if (m) m.time = time; }
+// 开始时间可以是今天、昨天或前天：过了零点才来记，或者已经疼了一两天的，都能照实记。只有「还没到的时间」不能选
+const DAY_WHEEL = ['前天', '昨天', '今天'];
+const startOff = t => Math.min(0, daysBetween(t.date, t.a.start.split('T')[0]));
+const startLabel = t => { const off = startOff(t), day = t.a.start.split('T')[0]; return `${off === 0 ? '' : off >= -2 ? DAY_WHEEL[off + 2] + ' ' : md(day) + ' '}${timeOf(t, '@start')}`; };
+function setStart(t, start) { const now = toLocalInput(new Date()); t.a.start = start > now ? now : start; }
 const TODAY_KEY = 'today-draft';
 
 const attackToToday = a => ({
@@ -279,7 +278,7 @@ function sideOf(a) {
   return loc.includes('左侧') ? 'L' : loc.includes('右侧') ? 'R' : loc.includes('双侧') ? 'B' : '';
 }
 function buildToday() {
-  const tk = todayKey(), d = state.days[tk] || {}, atk = attacksOn(tk)[0];
+  const tk = todayKey(), d = state.days[tk] || {}, atk = attacksOn(tk)[0] || state.attacks.find(a => a.homeDay === tk);
   const drinks = DRINKS.filter(x => drinkOn(d, x)).map(x => x[0]);
   return {
     date: tk, dirty: false, saved: !!atk || S.hasDayData(d), island: null,
@@ -343,17 +342,17 @@ const weatherText = t => t.weather ? '变天了' : '没变化';
 const ITEM_H = 40;
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i)), MINS = Array.from({ length: 60 }, (_, i) => pad2(i));
 const DUR_WHEEL = [[null, '说不准'], ...DUR_PRESETS];
-const WHEEL_NAME = { h: '几点', m: '几分', d: '持续多久' };
+const WHEEL_NAME = { day: '哪一天', h: '几点', m: '几分', d: '持续多久' };
 const wheel = (name, items, idx, cls = '') => `<div class="wheel ${cls}" data-wheel="${name}" data-i="${idx}" role="group" aria-label="${WHEEL_NAME[name]}"><div class="wh-pad"></div>${
   items.map((l, i) => `<button class="wh-i ${i === idx ? 'on' : ''}" data-act="isl-pick" data-i="${i}">${l}</button>`).join('')}<div class="wh-pad"></div></div>`;
-const timeWheels = time => {
+const timeWheels = (time, day = null) => {
   const [h, m] = (/^\d{1,2}:\d{2}$/.test(time || '') ? time : hhmm(new Date())).split(':').map(Number);
-  return `<div class="wheels"><div class="wh-band"></div>${wheel('h', HOURS, h)}<span class="wh-colon">:</span>${wheel('m', MINS, m)}</div>`;
+  return `<div class="wheels ${day == null ? '' : 'w3'}"><div class="wh-band"></div>${day == null ? '' : wheel('day', DAY_WHEEL, day, 'wday')}${wheel('h', HOURS, h)}<span class="wh-colon">:</span>${wheel('m', MINS, m)}</div>`;
 };
-const agoOn = (t, v) => !!ui.ago && ui.ago.v === String(v) && ui.ago.time === timeOf(t, '@start');
+const agoOn = (t, v) => !!ui.ago && ui.ago.v === String(v) && ui.ago.start === t.a.start;
 function islandHTML(t, k) {
   const head = (title, sub, extra = '') => `<div class="isl-head"><b>${title}</b><span class="isl-sub">${sub}</span>${extra}<button class="isl-ok" data-act="isl-close" aria-label="选好了，收起">${icon('check', 18, 2.6)}</button></div>`;
-  if (k === '@start') return `<div class="isl-in">${head('开始时间', '几点开始疼的')}${timeWheels(timeOf(t, k))}
+  if (k === '@start') return `<div class="isl-in">${head('开始时间', '什么时候开始疼的')}${timeWheels(timeOf(t, k), Math.max(0, startOff(t) + 2))}
     <div class="isl-foot">${AGO.map(([m, l]) => `<button class="chip mini ${agoOn(t, m) ? 'on' : ''}" data-act="t-ago" data-v="${m}" aria-pressed="${agoOn(t, m)}">${l}</button>`).join('')}</div></div>`;
   if (k === '@dur') return `<div class="isl-in">${head('持续时间', '疼了多久')}
     <div class="wheels"><div class="wh-band"></div>${wheel('d', DUR_WHEEL.map(x => x[1]), Math.max(0, DUR_WHEEL.findIndex(x => x[0] === t.a.duration)), 'wide')}</div></div>`;
@@ -371,7 +370,7 @@ document.body.appendChild($isl);
 const SPRING = CSS.supports?.('transition-timing-function', 'linear(0, 1)')
   ? 'linear(0, .2 5%, .55 12%, .84 20%, 1.01 28%, 1.07 35%, 1.075 41%, 1.05 50%, 1.015 62%, .997 76%, 1)' : 'cubic-bezier(.3, 1.3, .5, 1)';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let islAnims = [], islandSkip = null, wheelTimer = 0, wheelTouched = false;
+let islAnims = [], islandSkip = null, wheelTimer = 0, wheelTouched = false, dayTouched = false, dayAuto = false;
 const openerOf = k => [...$app.querySelectorAll('[data-isl]')].find(el => el.dataset.isl === k);
 const morph = (from, to) => `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
 
@@ -380,7 +379,7 @@ function openIsland(k, opener) {
   islAnims.forEach(a => a.cancel());
   islAnims = [];
   clearTimeout(wheelTimer);
-  wheelTouched = false;
+  wheelTouched = dayTouched = dayAuto = false;
   ui.island = k;
   $isl.innerHTML = islandHTML(t, k);
   $isl.hidden = false;
@@ -428,9 +427,20 @@ function commitWheels() {
     if (t.a.duration !== v) editToday(({ a }) => { a.duration = v; });
     return;
   }
-  // 药的时间是选填的：没碰过滚轮、也没记过时间，就保持「不记时间」
-  if (k !== '@start' && !timeOf(t, k) && !wheelTouched) return;
   const time = `${pad2(val('h'))}:${pad2(val('m'))}`;
+  if (k === '@start') {
+    // 「今天」里滚到一个还没到的钟点：没亲手选过哪一天，就当作是昨天的这个钟点（再滚回已经过去的钟点，又回到今天）；
+    // 亲手选了「今天」，才把时间拉回现在
+    let off = val('day') - 2;
+    const late = time > hhmm(new Date());
+    if (off === 0 && late && !dayTouched) { off = -1; dayAuto = true; }
+    else if (off === -1 && dayAuto && !late) { off = 0; dayAuto = false; }
+    const start = `${shiftKey(t.date, off)}T${time}`;
+    if (t.a.start !== start) editToday(x => setStart(x, start)); else syncIsland();
+    return;
+  }
+  // 药的时间是选填的：没碰过滚轮、也没记过时间，就保持「不记时间」
+  if (!timeOf(t, k) && !wheelTouched) return;
   if (timeOf(t, k) !== time) editToday(x => setTimeOf(x, k, time));
 }
 function syncIsland() {
@@ -448,13 +458,13 @@ function syncIsland() {
   }
   $isl.querySelectorAll('[data-act="t-ago"]').forEach(b => { const on = agoOn(t, b.dataset.v); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   const [h, mi] = timeOf(t, k).split(':').map(Number);
-  [['h', h], ['m', mi]].forEach(([n, i]) => {
+  [['day', Math.max(0, startOff(t) + 2)], ['h', h], ['m', mi]].forEach(([n, i]) => {
     const w = $isl.querySelector(`[data-wheel="${n}"]`);
     if (w && +(w.dataset.to ?? w.dataset.i) !== i) { w.dataset.to = i; w.scrollTo({ top: i * ITEM_H, behavior: 'smooth' }); }
   });
 }
 // 手指（或鼠标滚轮）碰过滚轮，才算用户在选时间；打开面板时程序自己把滚轮摆到位不算
-['pointerdown', 'touchstart', 'wheel'].forEach(ev => $isl.addEventListener(ev, e => { const w = e.target.closest?.('.wheel'); if (w) { wheelTouched = true; delete w.dataset.to; } }, { capture: true, passive: true }));
+['pointerdown', 'touchstart', 'wheel'].forEach(ev => $isl.addEventListener(ev, e => { const w = e.target.closest?.('.wheel'); if (w) { wheelTouched = true; delete w.dataset.to; if (w.dataset.wheel === 'day') { dayTouched = true; dayAuto = false; } } }, { capture: true, passive: true }));
 $isl.addEventListener('scroll', e => {
   const w = e.target;
   if (!w.classList?.contains('wheel')) return;
@@ -485,7 +495,7 @@ function todayCards() {
   const row = (label, body, cls = '') => `<div class="trow ${cls}"><span class="trow-l">${label}</span><div class="trow-c">${body}</div></div>`;
   const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
   // 时间和用药：点一下，从这一颗里弹出滚轮面板
-  const startChip = `<button class="chip mini tchip" data-act="t-island" data-isl="@start" data-v="@start" aria-label="开始时间">${icon('clock', 14, 2)}<span class="t-start">${timeOf(t, '@start')}</span>开始</button>`;
+  const startChip = `<button class="chip mini tchip" data-act="t-island" data-isl="@start" data-v="@start" aria-label="开始时间">${icon('clock', 14, 2)}<span class="t-start">${startLabel(t)}</span>开始</button>`;
   const durChip = `<button class="chip mini tchip ${a.duration ? 'on' : ''}" data-act="t-island" data-isl="@dur" data-v="@dur"><span class="t-dur">${a.duration ? `持续 ${durText(a.duration)}` : '持续多久'}</span>${icon('chevD', 13, 2.2)}</button>`;
   const medChip = p => {
     const m = a.meds.find(x => x.name === p.name), n = esc(p.name);
@@ -560,7 +570,7 @@ function syncToday() {
     if (el.hasAttribute('aria-pressed')) el.setAttribute('aria-pressed', on);
   });
   root.querySelectorAll('.mchip').forEach(el => { el.querySelector('.mc-t').textContent = a.meds.find(x => x.name === el.dataset.v)?.time || ''; });
-  root.querySelector('.t-start').textContent = timeOf(t, '@start');
+  root.querySelector('.t-start').textContent = startLabel(t);
   root.querySelector('.t-dur').textContent = a.duration ? `持续 ${durText(a.duration)}` : '持续多久';
   root.querySelector('.tgl[data-act="t-period"] i').textContent = periodText(t);
   root.querySelector('.tgl[data-act="t-weather"] i').textContent = weatherText(t);
@@ -582,6 +592,7 @@ function saveToday() {
       impact: a.impact ?? null, note: (a.note || '').trim(), createdAt: a.createdAt || Date.now(), updatedAt: Date.now(),
     };
     if (!a.regions.length && a.locations?.length) rec.locations = a.locations;
+    if (dkey(start) !== tk) rec.homeDay = tk;
     upsertAttack(rec);
   } else if (a.id && state.attacks.some(x => x.id === a.id)) {
     if (!confirm('疼痛选了 0，要删掉今天这次头痛记录吗？')) return;
@@ -1110,7 +1121,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.13</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.14</div></div></div>
   </div>`;
 }
 
@@ -1681,10 +1692,11 @@ const ACTIONS = {
   'isl-pick': el => { wheelTouched = true; el.parentElement.dataset.to = el.dataset.i; el.parentElement.scrollTo({ top: +el.dataset.i * ITEM_H, behavior: 'smooth' }); },
   // 快捷时间：选中的那颗亮起来，滚轮跟着滚到那个时间（之后再动滚轮，它就灭了）
   't-ago': el => {
-    const d = new Date(Date.now() - +el.dataset.v * 60000), time = dkey(d) === ui.today.date ? hhmm(d) : '00:00';
+    const start = toLocalInput(new Date(Date.now() - +el.dataset.v * 60000));
     clearTimeout(wheelTimer);
-    ui.ago = { v: el.dataset.v, time };
-    editToday(t => setTimeOf(t, '@start', time));
+    dayTouched = dayAuto = false;
+    ui.ago = { v: el.dataset.v, start };
+    editToday(t => setStart(t, start));
   },
   // 点一种药：没记过就记上（时间先按现在），然后弹出面板改时间、选效果
   't-med': el => {
@@ -1803,6 +1815,7 @@ const ACTIONS = {
       impact: d.impact ?? null, note: (d.note || '').trim(), createdAt: d.createdAt || Date.now(), updatedAt: Date.now(),
     };
     if (!d.regions.length && d.locations?.length) a.locations = d.locations;
+    if (d.homeDay && d.homeDay !== dkey(start)) a.homeDay = d.homeDay;
     upsertAttack(a);
     // 首页有没保存的草稿时，把这次头痛同步过去；没有草稿的话首页会按保存的数据重新显示
     if (ui.today?.dirty && ui.today.date === S.attackDay(a)) { ui.today.vas = vasOf(a); ui.today.a = attackToToday(a); keepDraft(); }
