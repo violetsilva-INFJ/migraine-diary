@@ -82,8 +82,8 @@
   --card-border: transparent;
   --radius: 20px;
   --tabbar-h: 64px;
-  --zenith: #9A96D9;
-  --zenith-half: rgba(154, 150, 217, .5);
+  --zenith: #CAC4F1;
+  --zenith-half: rgba(202, 196, 241, .5);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
@@ -93,8 +93,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --zenith: #4A4772;
-    --zenith-half: rgba(74, 71, 114, .5);
+    --zenith: #656284;
+    --zenith-half: rgba(101, 98, 132, .5);
     --bg: #0F1016;
     --card: #1B1C24;
     --fill: #25262F;
@@ -758,23 +758,20 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .view.v-home { padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 18px); display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .v-home > * { flex: none; position: relative; z-index: 1; }
 /* 问候语后面是一幅「水面上的日出」：贴着面板上沿放，太阳在地平线上，地平线落在面板上边框上方一点。
-   画的最上面压一层天顶的颜色，和状态栏接上：
-   · 全屏（html.bleed：内容能铺到刘海 / 灵动岛后面）时，画一直铺到屏幕顶，天顶深一些，状态栏的白字才看得清；
-   · 不是全屏时，状态栏是系统自己画的一条，颜色取页面底色（body 的 background-color），所以把页面底色设成同一个天顶色，
-     真正的页面底（米色的纸）放在 body::after 那一层上。
+   · 全屏（html.bleed：内容能铺到刘海 / 灵动岛后面）时，画一直铺到屏幕顶，最上面压一层深一些的天顶色，状态栏的白字才看得清；
+   · 不是全屏时，状态栏是系统自己画的一条，颜色取页面底色（body 的 background-color）。把页面底色设成画最上面那片天的颜色，
+     画就从状态栏下沿直接开始（灵动岛下缘到画、和灵动岛上缘到屏幕顶一样远）；真正的页面底（米色的纸）在 body::after 那一层。
+     系统还会把状态栏下面约 35pt 的内容虚化，所以问候和日期从 44px 往下才开始，不放在那条虚化带里。
    位置只用最基本的写法（底边对齐、宽度 100%），各家浏览器画出来都一样 */
-.v-home > .home-sky { z-index: 0; margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 84px; }
+.v-home > .home-sky { z-index: 0; margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: 44px 16px 84px; }
+.bleed .v-home > .home-sky { padding-top: calc(var(--safe-t) + 14px); }
 .sky-art {
   position: absolute; z-index: -1; top: -90px; left: 0; right: 0; bottom: -28px; pointer-events: none;
   background: #C9C3F1 url(../img/home-sky.jpg) 50% 100% / 100% auto no-repeat;
   -webkit-mask-image: linear-gradient(#000 calc(100% - 30px), transparent); mask-image: linear-gradient(#000 calc(100% - 30px), transparent);
 }
-.home-sky::after {
-  content: ""; position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: 42px; pointer-events: none;
-  background: linear-gradient(var(--zenith), var(--zenith-half) 40%, transparent);
-}
 .bleed .home-sky::after {
-  height: calc(var(--safe-t) + 44px);
+  content: ""; position: absolute; z-index: -1; top: 0; left: 0; right: 0; height: calc(var(--safe-t) + 44px); pointer-events: none;
   background: linear-gradient(var(--zenith) calc(var(--safe-t) * .35), var(--zenith-half) calc(var(--safe-t) + 4px), transparent);
 }
 /* 深色模式：换成暮色的那一幅（太阳还亮着） */
@@ -796,9 +793,10 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 30px; }
 @media (min-height: 880px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 48px; } }
 @media (max-height: 830px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 20px; } }
-.v-home .top { margin: 2px 2px 0; }
-.v-home .top h1 { font-size: 25px; }
-.v-home .eyebrow { font-size: 13px; color: var(--ink); opacity: .7; }
+.v-home .top { margin: 0 2px; align-items: flex-end; }
+.v-home .top h1 { margin: 0; min-width: 0; font-size: 25px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; padding-bottom: 3px; font-size: 13px; line-height: 1.35; font-weight: 500; color: var(--ink); opacity: .72; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.home-streak { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
 
 /* 面板占满余下的高度：各行均分，选项横向铺满 */
 .v-home > .today { flex: 1 0 auto; display: flex; flex-direction: column; margin-bottom: 0; padding: 6px 12px 12px; background: none; border-color: transparent; box-shadow: none; }

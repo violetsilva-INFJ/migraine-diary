@@ -151,7 +151,7 @@ function render() {
   if (ui.tab === 'me') updatePersistInfo();
   document.documentElement.dataset.tab = ui.tab;
   // 系统自己画状态栏的那些 iOS 版本，状态栏取页面底色：首页让它和画的天顶同色，其他页面用页面底色
-  const tc = ui.tab === 'home' ? ['#9A96D9', '#4A4772'] : ['#F5F2EC', '#0F1016'];
+  const tc = ui.tab === 'home' ? ['#CAC4F1', '#656284'] : ['#F5F2EC', '#0F1016'];
   document.querySelectorAll('meta[name="theme-color"]').forEach((m, i) => { m.content = tc[i]; });
 }
 
@@ -350,10 +350,11 @@ const timeWheels = time => {
   const [h, m] = (/^\d{1,2}:\d{2}$/.test(time || '') ? time : hhmm(new Date())).split(':').map(Number);
   return `<div class="wheels"><div class="wh-band"></div>${wheel('h', HOURS, h)}<span class="wh-colon">:</span>${wheel('m', MINS, m)}</div>`;
 };
+const agoOn = (t, v) => !!ui.ago && ui.ago.v === String(v) && ui.ago.time === timeOf(t, '@start');
 function islandHTML(t, k) {
   const head = (title, sub, extra = '') => `<div class="isl-head"><b>${title}</b><span class="isl-sub">${sub}</span>${extra}<button class="isl-ok" data-act="isl-close" aria-label="选好了，收起">${icon('check', 18, 2.6)}</button></div>`;
   if (k === '@start') return `<div class="isl-in">${head('开始时间', '几点开始疼的')}${timeWheels(timeOf(t, k))}
-    <div class="isl-foot">${AGO.map(([m, l]) => `<button class="chip mini" data-act="t-ago" data-v="${m}">${l}</button>`).join('')}</div></div>`;
+    <div class="isl-foot">${AGO.map(([m, l]) => `<button class="chip mini ${agoOn(t, m) ? 'on' : ''}" data-act="t-ago" data-v="${m}" aria-pressed="${agoOn(t, m)}">${l}</button>`).join('')}</div></div>`;
   if (k === '@dur') return `<div class="isl-in">${head('持续时间', '疼了多久')}
     <div class="wheels"><div class="wh-band"></div>${wheel('d', DUR_WHEEL.map(x => x[1]), Math.max(0, DUR_WHEEL.findIndex(x => x[0] === t.a.duration)), 'wide')}</div></div>`;
   const m = t.a.meds.find(x => x.name === k), n = esc(k);
@@ -421,7 +422,7 @@ function commitWheels() {
   clearTimeout(wheelTimer);
   const k = ui.island, t = ui.today;
   if (!k || !t || $isl.hidden) return;
-  const val = n => +($isl.querySelector(`[data-wheel="${n}"]`)?.dataset.i ?? 0);
+  const val = n => { const w = $isl.querySelector(`[data-wheel="${n}"]`); return +(w?.dataset.to ?? w?.dataset.i ?? 0); };
   if (k === '@dur') {
     const v = DUR_WHEEL[val('d')]?.[0] ?? null;
     if (t.a.duration !== v) editToday(({ a }) => { a.duration = v; });
@@ -445,14 +446,15 @@ function syncIsland() {
     nt.setAttribute('aria-pressed', !m.time);
     if (!m.time) return;
   }
+  $isl.querySelectorAll('[data-act="t-ago"]').forEach(b => { const on = agoOn(t, b.dataset.v); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   const [h, mi] = timeOf(t, k).split(':').map(Number);
   [['h', h], ['m', mi]].forEach(([n, i]) => {
     const w = $isl.querySelector(`[data-wheel="${n}"]`);
-    if (w && +w.dataset.i !== i) w.scrollTo({ top: i * ITEM_H, behavior: 'smooth' });
+    if (w && +(w.dataset.to ?? w.dataset.i) !== i) { w.dataset.to = i; w.scrollTo({ top: i * ITEM_H, behavior: 'smooth' }); }
   });
 }
 // 手指（或鼠标滚轮）碰过滚轮，才算用户在选时间；打开面板时程序自己把滚轮摆到位不算
-['pointerdown', 'touchstart', 'wheel'].forEach(ev => $isl.addEventListener(ev, e => { if (e.target.closest?.('.wheel')) wheelTouched = true; }, { capture: true, passive: true }));
+['pointerdown', 'touchstart', 'wheel'].forEach(ev => $isl.addEventListener(ev, e => { const w = e.target.closest?.('.wheel'); if (w) { wheelTouched = true; delete w.dataset.to; } }, { capture: true, passive: true }));
 $isl.addEventListener('scroll', e => {
   const w = e.target;
   if (!w.classList?.contains('wheel')) return;
@@ -462,6 +464,7 @@ $isl.addEventListener('scroll', e => {
     w.children[i + 1].classList.add('on');
     w.dataset.i = i;
   }
+  if (+w.dataset.to === i) delete w.dataset.to;
   clearTimeout(wheelTimer);
   wheelTimer = setTimeout(commitWheels, 140);
 }, { capture: true, passive: true });
@@ -613,9 +616,9 @@ function viewHome() {
   const name = (state.settings.name || '').trim();
   const streak = streakDays();
   return `
-  <div class="home-sky"><div class="sky-art" aria-hidden="true"></div>${header(`${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`, `${greet}${name ? '，' + esc(name) : ''}`,
-    `<div class="top-actions">${streak >= 2 ? `<span class="streak">${icon('sun', 15, 2)}${streak} 天</span>` : ''}
-      <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}</div>
+  <div class="home-sky"><div class="sky-art" aria-hidden="true"></div>
+    <header class="top"><h1>${greet}${name ? '，' + esc(name) : ''}</h1>
+      <div class="home-meta"><span>${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}</span>${streak >= 2 ? `<span class="home-streak">${icon('sun', 13, 2)}连续 ${streak} 天</span>` : ''}</div></header></div>
   ${installBanner()}
   ${todayCards()}`;
 }
@@ -1107,7 +1110,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.11</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.12</div></div></div>
   </div>`;
 }
 
@@ -1675,13 +1678,13 @@ const ACTIONS = {
   // 弹出 / 收起滚轮面板（不算改动）
   't-island': el => { const k = el.dataset.v; if (islandSkip === k) { islandSkip = null; return; } openIsland(k, el); },
   'isl-close': () => closeIsland(),
-  'isl-pick': el => { wheelTouched = true; el.parentElement.scrollTo({ top: +el.dataset.i * ITEM_H, behavior: 'smooth' }); },
+  'isl-pick': el => { wheelTouched = true; el.parentElement.dataset.to = el.dataset.i; el.parentElement.scrollTo({ top: +el.dataset.i * ITEM_H, behavior: 'smooth' }); },
+  // 快捷时间：选中的那颗亮起来，滚轮跟着滚到那个时间（之后再动滚轮，它就灭了）
   't-ago': el => {
-    editToday(t => {
-      const d = new Date(Date.now() - +el.dataset.v * 60000);
-      setTimeOf(t, '@start', dkey(d) === t.date ? hhmm(d) : '00:00');
-    });
-    closeIsland();
+    const d = new Date(Date.now() - +el.dataset.v * 60000), time = dkey(d) === ui.today.date ? hhmm(d) : '00:00';
+    clearTimeout(wheelTimer);
+    ui.ago = { v: el.dataset.v, time };
+    editToday(t => setTimeOf(t, '@start', time));
   },
   // 点一种药：没记过就记上（时间先按现在），然后弹出面板改时间、选效果
   't-med': el => {
