@@ -1,9 +1,9 @@
 // 离线缓存：先走网络（拿到最新版本），断网时用缓存。
-const CACHE = 'migraine-diary-v10';
+const CACHE = 'migraine-diary-v11';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
-  './js/app.js', './js/db.js', './js/stats.js', './js/util.js', './js/headmap.js', './js/parse.js', './js/ai.js',
-  './icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png',
+  './js/app.js', './js/db.js', './js/stats.js', './js/util.js', './js/headmap.js',
+  './img/home-sky.jpg', './icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png',
 ];
 
 self.addEventListener('install', e => {

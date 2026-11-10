@@ -1,6 +1,6 @@
 import * as db from './db.js';
 import {
-  WEEK, dkey, parseKey, shiftKey, todayKey, startOfMonth, addMonths, hhmm, toLocalInput, md, mdw, uid, esc, fmtNum, pct,
+  WEEK, dkey, parseKey, shiftKey, todayKey, startOfMonth, addMonths, daysBetween, hhmm, toLocalInput, md, mdw, uid, esc, fmtNum, pct,
   SEVERITY, SYMPTOMS, DURATIONS, durationOf, TRIGGERS, EFFECTS, RELIEF, STRESS, MEALS, DEFAULT_MEDS, icon,
   vasOf, sevOfVas, vasWord, REGIONS, REGION_IDS, LAT_LABEL, laterality, regionSummary, QUALITIES,
   MOOD, MOOD_SHORT, FEELINGS_NEG, FEELINGS_POS, MOOD_FACTORS, stressOf,
@@ -8,8 +8,6 @@ import {
 } from './util.js';
 import { headSVG, VIEWS, VIEW_REGIONS } from './headmap.js';
 import * as S from './stats.js';
-import { fromAI, itemText, dayWord } from './parse.js';
-import { AI_PRESETS, aiConf, aiReady, aiParse } from './ai.js';
 
 // ======================= 状态 =======================
 const state = {
@@ -17,11 +15,7 @@ const state = {
   days: {},
   settings: { name: '', meds: DEFAULT_MEDS.map(m => ({ ...m })), customTriggers: [], hideInstall: false },
 };
-const ui = { tab: 'home', prevTab: null, month: startOfMonth(new Date()), sel: todayKey(), sheet: null, qeText: '' };
-// AI 识别的设置（含密钥）单独存放，不放进 settings，所以不会跟着备份导出
-const AI_DEFAULT = () => ({ preset: null, cfg: {} });
-state.ai = AI_DEFAULT();
-try { ui.qeText = localStorage.getItem('qe-draft') || ''; } catch { /* 无痕模式等 */ }
+const ui = { tab: 'home', prevTab: null, month: startOfMonth(new Date()), sel: todayKey(), sheet: null, today: null };
 let cache = null;
 const analysis = () => (cache ||= S.analyze(state));
 const invalidate = () => { cache = null; };
@@ -42,8 +36,9 @@ async function load() {
   state.days = Object.fromEntries(days.map(d => [d.date, d]));
   const s = meta.find(m => m.key === 'settings');
   if (s) Object.assign(state.settings, s.value);
-  const ai = meta.find(m => m.key === 'ai');
-  if (ai) Object.assign(state.ai, ai.value);
+  // 旧版「AI 记录」的设置（含密钥）已经不用了：读取时顺手删掉
+  if (meta.some(m => m.key === 'ai')) db.remove('meta', 'ai');
+  try { localStorage.removeItem('qe-draft'); } catch { /* ignore */ }
 }
 
 let persistAsked = false;
@@ -53,7 +48,6 @@ function afterWrite() {
 }
 
 const saveSettings = () => db.put('meta', { key: 'settings', value: state.settings });
-const saveAI = () => db.put('meta', { key: 'ai', value: state.ai });
 
 function saveDay(day) {
   if (S.keepDay(day)) {
@@ -151,15 +145,13 @@ function render() {
     <nav class="tabbar" aria-label="主导航">
       ${TABS.map(([k, label, ic]) => `<button class="tab ${ui.tab === k ? 'on' : ''} ${ui.tab === k && anim ? 'just' : ''}" data-act="tab" data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${icon(ic, 23, 1.8)}<span>${label}</span></button>`).join('')}
     </nav>`;
-  ui.heroEnter = false;
-  bindTrend();
   if (anim) countUp($app);
   else popLast($app);
   if (ui.tab === 'me') updatePersistInfo();
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
-const POP_ACTS = new Set(['qi-toggle', 'qi-med', 'ai-preset', 'q-attach', 'c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-ex', 'c-sleep-set', 'c-period', 'sel-day', 'med-kind']);
+const POP_ACTS = new Set(['c-feel', 'c-factor', 'c-int', 'log-cat', 'log-kind', 'log-sel', 'scale-ans', 'head-view', 'figure', 'a-toggle','a-dur', 'region', 'a-med-effect', 'a-med-relief', 'a-ago', 'c-meal', 'c-ex', 'c-sleep-set', 'c-period', 'sel-day', 'med-kind']);
 let lastHit = null;
 const hitKey = el => `${el.dataset.act}|${el.dataset.v ?? el.dataset.id ?? el.dataset.i ?? el.dataset.k ?? el.dataset.m ?? ''}`;
 function popLast(root) {
@@ -239,162 +231,237 @@ function installBanner() {
     <button class="icon-btn" data-act="hide-install" aria-label="不再提示">${icon('x', 18)}</button></div>`;
 }
 
-function heroCard() {
-  const tk = todayKey(), day = state.days[tk], todays = attacksOn(tk), A = analysis();
-  const cls = `hero ${ui.heroEnter ? 'enter' : ''}`;
-  if (todays.length) {
-    const a = todays[0], v = vasOf(a);
-    const meta = [regionSummary(a), a.qualities?.[0], a.meds?.length ? '已服药' : '还没服药'].filter(Boolean);
-    return `<section class="${cls}">
-      <div class="label">今天 ${hhmm(new Date(a.start))} 开始头痛${todays.length > 1 ? ` · 共 ${todays.length} 次` : ''}</div>
-      <div class="vas-big"><b>${counted(v)}</b><span>/10 · ${vasWord(v)}</span></div>
-      <div class="meta-line">${meta.map(m => `<span>${esc(m)}</span>`).join('<i>·</i>')}</div>
-      <div class="actions"><button class="hbtn" data-act="edit-attack" data-id="${a.id}">${icon('edit', 18)}查看 / 修改</button>
-        <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}再记一次</button></div>
-    </section>`;
+// ----------------------- 今天：一屏记完 -----------------------
+// 疼痛程度放最前（0 = 今天没有头痛）；疼了才展开门诊问诊的其余几项：时间和持续、侧别、性质、伴随症状、用药、对日常的影响。
+// 下面一组诱因：睡眠、喝了什么、月经、天气。改动先存草稿，点「保存」一次写入；详细记录在「手记」里。
+// 首页的点选都在原地更新（不重绘整页），展开、收起和用药的「灵动岛」才有连贯的过渡。
+const SIDES = [['L', '左'], ['R', '右'], ['B', '两侧'], ['all', '整个头']];
+const SIDE_LOC = { L: '左侧', R: '右侧', B: '双侧' };
+const QUICK_Q = [['跳痛 / 搏动感', '跳痛'], ['压迫 / 紧箍感', '紧箍'], ['胀痛', '胀痛'], ['刺痛', '刺痛'], ['钝痛', '钝痛']];
+const QUICK_SYM = [['恶心', '恶心'], ['呕吐', '呕吐'], ['畏光', '怕光'], ['畏声', '怕吵'], ['视觉先兆', '闪光']];
+const IMPACT = ['没耽误', '有点耽误', '做不了事'];
+const IMPACT_SHORT = ['没有', '有点', '做不了事'];
+const EFFECT_SHORT = ['无效', '部分', '完全'];
+// 喝了什么：[按钮文字, 饮食大类, 记录的项目]；咖啡、茶、奶茶会自动算作咖啡因
+const DRINKS = [['咖啡', '饮品', '咖啡'], ['茶', '饮品', '浓茶'], ['奶茶', '饮品', '奶茶'], ['酒', '酒类', '酒']];
+const drinkMatch = (f, [label, , item]) => label === '酒' ? f.cat === '酒类' : f.item === item;
+const drinkOn = (d, x) => (d.foods || []).some(f => drinkMatch(f, x)) || (x[0] === '酒' && d.alcohol === true);
+const SLEEP_OPTS = [[5, '≤5h'], [6, '6h'], [7, '7h'], [8, '8h'], [9, '≥9h']];
+const TODAY_KEY = 'today-draft';
+
+const attackToToday = a => ({
+  ...structuredClone(a), start: toLocalInput(new Date(a.start)), impact: a.impact ?? null,
+  regions: a.regions || [], qualities: a.qualities || [], symptoms: a.symptoms || [], triggers: a.triggers || [], meds: a.meds || [],
+});
+// 只选了左右（没画部位图）时存成 locations；选了「整个头」存成全部区域；画过部位图的在部位图里改
+function sideOf(a) {
+  if (a.regions.length === REGION_IDS.length) return 'all';
+  if (a.regions.length) return null;
+  const loc = a.locations || [];
+  return loc.includes('左侧') ? 'L' : loc.includes('右侧') ? 'R' : loc.includes('双侧') ? 'B' : '';
+}
+function buildToday() {
+  const tk = todayKey(), d = state.days[tk] || {}, atk = attacksOn(tk)[0];
+  const drinks = DRINKS.filter(x => drinkOn(d, x)).map(x => x[0]);
+  return {
+    date: tk, dirty: false, saved: !!atk || S.hasDayData(d), island: null,
+    vas: atk ? vasOf(atk) : 0,
+    a: atk ? attackToToday(atk) : { ...newAttackDraft(tk), impact: null },
+    sleep: d.sleep ?? null,
+    drinks: drinks.length ? drinks : d.caffeine === 0 ? ['none'] : [],
+    period: !!d.period, weather: !!d.weather,
+  };
+}
+// 没改动时总是按已保存的数据显示；有没保存的改动时保留草稿（也存一份到本机，切走再回来不会丢）
+function todayState() {
+  const tk = todayKey();
+  if (!ui.today || ui.today.date !== tk) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(TODAY_KEY) || 'null'); } catch { /* ignore */ }
+    // 草稿格式不对（比如旧版本留下的）就不用
+    const ok = saved && saved.date === tk && saved.dirty && typeof saved.vas === 'number' && saved.a?.start && Array.isArray(saved.a.meds);
+    ui.today = ok ? saved : buildToday();
+  } else if (!ui.today.dirty) ui.today = buildToday();
+  return ui.today;
+}
+function keepDraft() {
+  ui.today.dirty = true;
+  try { localStorage.setItem(TODAY_KEY, JSON.stringify(ui.today)); } catch { /* ignore */ }
+}
+function editToday(fn) {
+  fn(ui.today);
+  keepDraft();
+  syncToday();
+}
+
+function todayOn(t, act, v) {
+  const a = t.a;
+  switch (act) {
+    case 't-side': return sideOf(a) === v;
+    case 't-q': return a.qualities.includes(v);
+    case 't-sym': return a.symptoms.includes(v);
+    case 't-impact': return a.impact === +v;
+    case 't-sleep': return t.sleep === +v;
+    case 't-drink': return t.drinks.includes(v);
+    case 't-period': return v === '1' ? t.period : !t.period;
+    case 't-weather': return v === '1' ? t.weather : !t.weather;
+    default: return null;
   }
-  if (day?.pain === 0) {
-    return `<section class="${cls}">
-      <div class="label">今日天色</div><h2>晴 · 没有头痛 ${icon('checkCircle', 22, 2)}</h2>
-      <p>${['愿今天的光一直这样柔和，记得按时吃饭、多喝水', '天色正好，今晚也早些入梦', '状态不错，把这份轻盈留久一点'][new Date().getDate() % 3]}</p>
-      <button class="link" data-act="new-attack">其实头痛了？记录一下 ${icon('chevR', 16)}</button>
-    </section>`;
-  }
-  const risk = A.forecast && A.forecast.ratio >= 1.5
-    ? `<div class="risk">${icon('alert', 18)}<span>根据今天的打卡，发作风险比平时高（约 ${pct(A.forecast.p)}），可以早点休息、把药带在身边。</span></div>` : '';
-  return `<section class="${cls}">
-    <div class="label">今日天色</div><h2>今天，头还好吗？</h2><p>每天落一笔，规律会像画一样慢慢浮现</p>
-    <div class="actions"><button class="hbtn" data-act="no-pain">${icon('sun', 18, 2)}晴，没有头痛</button>
-      <button class="hbtn solid" data-act="new-attack">${icon('plus', 18, 2.2)}记下头痛</button></div>
-    ${risk}
+}
+const vasLabel = v => v > 0 ? `<b>${v}</b>${vasWord(v)}` : '<b>0</b>没有头痛';
+const saveLabel = t => !t.dirty && t.saved ? `${icon('check', 17, 2.4)}今天已记好` : '保存';
+function periodDay(t) {
+  if (!t.period) return 0;
+  if (state.days[t.date]?.period) return S.periodDayNumber(state.days, t.date);
+  const y = shiftKey(t.date, -1);
+  return state.days[y]?.period ? S.periodDayNumber(state.days, y) + 1 : 1;
+}
+
+function todayCards() {
+  const t = todayState(), a = t.a, st = parseLocal(a.start), dur = durationOf(a.duration), side = sideOf(a);
+  const chip = (act, v, label, aria = '') => {
+    const on = todayOn(t, act, String(v));
+    return `<button class="chip mini ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}" aria-pressed="${on}"${aria ? ` aria-label="${esc(aria)}"` : ''}>${label}</button>`;
+  };
+  const row = (label, body, cls = '') => `<div class="trow ${cls}"><span class="trow-l">${label}</span><div class="trow-c">${body}</div></div>`;
+  const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
+  const openMed = t.island && a.meds.some(m => m.name === t.island);
+  // 用药：点一下，这一颗胶囊像灵动岛一样展开，可以选时间和效果，旁边的药被挤窄
+  const medChip = p => {
+    const m = a.meds.find(x => x.name === p.name), n = esc(p.name);
+    return `<div class="mchip ${m ? 'sel' : ''} ${m && t.island === p.name ? 'open' : ''}" data-name="${n}">
+      <div class="mc-top"><button class="mc-name" data-act="t-med" data-v="${n}" data-dose="${esc(p.dose)}" aria-label="${n}">${n}</button>
+        <button class="mc-x" data-act="t-med-del" data-v="${n}" aria-label="不记${n}">${icon('x', 13, 2.4)}</button></div>
+      <div class="mc-more"><div><div class="mc-inner">
+        <label class="mc-time">${icon('clock', 13, 2)}<span>${esc(m?.time || '几点')}</span><input type="time" value="${esc(m?.time || '')}" data-input="t-med-time" data-m="${n}" aria-label="${n}的服药时间"></label>
+        <div class="mc-eff">${EFFECT_SHORT.map((l, v) => `<button class="${m?.effect === v ? 'on' : ''}" data-act="t-eff" data-m="${n}" data-v="${v}" aria-label="${EFFECTS[v].label}">${l}</button>`).join('')}</div>
+      </div></div></div>
+    </div>`;
+  };
+  return `<section class="card today ${t.vas > 0 ? 'has-pain' : ''}">
+    ${row('疼痛', `<div class="vas-wrap"><input class="range" type="range" min="0" max="10" step="1" value="${t.vas}" data-input="t-vas" aria-label="疼痛程度，0 是没有头痛，10 是能想象的最痛">
+      <div class="vas-ends" aria-hidden="true"><span>0 不痛</span><span>10 最痛</span></div></div><span class="t-vas" id="t-vas">${vasLabel(t.vas)}</span>`, 'r-vas')}
+    <div class="pain-rows"><div>
+      ${row('时间', `<label class="t-pill">${icon('clock', 14, 2)}<span>${hhmm(st)}</span><input type="time" value="${hhmm(st)}" data-input="t-time" aria-label="开始时间"></label>
+        <label class="t-pill"><span class="t-dur">${dur ? `持续 ${dur.label}` : '持续多久'}</span>${icon('chevD', 13, 2.2)}<select data-input="t-dur" aria-label="持续多久"><option value="">还不确定</option>${DURATIONS.map(o => `<option value="${o.k}" ${a.duration === o.k ? 'selected' : ''}>${o.label}</option>`).join('')}</select></label>`)}
+      ${row('侧别', side === null ? `<span class="t-note">${esc(regionSummary(a))}</span><button class="link-btn" data-act="t-detail">改</button>` : SIDES.map(([k, l]) => chip('t-side', k, l)).join(''))}
+      ${row('性质', QUICK_Q.map(([k, l]) => chip('t-q', k, l, k)).join(''))}
+      ${row('伴随', QUICK_SYM.map(([k, l]) => chip('t-sym', k, l, k)).join(''))}
+      ${row('用药', presets.length ? `<div class="meds-row ${openMed ? 'has-open' : ''}">${presets.map(medChip).join('')}</div>` : '<span class="t-note">在「我的」里添加常用药</span>', 'r-meds')}
+      ${row('耽误', IMPACT_SHORT.map((l, i) => chip('t-impact', i, l, `耽误上班、带孩子：${IMPACT[i]}`)).join('') + `<button class="t-more" data-act="t-detail" aria-label="部位图、诱因、备注">详细${icon('chevR', 14)}</button>`)}
+    </div></div>
+    <div class="t-div"><span>诱因</span></div>
+    ${row('睡眠', SLEEP_OPTS.map(([v, l]) => chip('t-sleep', v, l)).join('') + (t.sleep != null && !SLEEP_OPTS.some(([v]) => v === t.sleep) ? chip('t-sleep', t.sleep, `${t.sleep}h`) : ''))}
+    ${row('喝了', DRINKS.map(([l]) => chip('t-drink', l, l)).join('') + chip('t-drink', 'none', '没喝'))}
+    ${row('月经', chip('t-period', '0', '不在经期') + chip('t-period', '1', t.period ? `经期第 ${periodDay(t)} 天` : '经期中'))}
+    ${row('天气', chip('t-weather', '0', '没变化') + chip('t-weather', '1', '变天了'))}
+    <button class="btn primary block t-save ${!t.dirty && t.saved ? 'done' : ''}" data-act="t-save">${saveLabel(t)}</button>
   </section>`;
 }
 
+// 原地同步：只改 class 和文字，让 CSS 过渡自己完成动画
+function syncToday() {
+  const t = ui.today, a = t.a, root = $app.querySelector('.today');
+  if (!root) return;
+  root.classList.toggle('has-pain', t.vas > 0);
+  root.querySelectorAll('.chip[data-act]').forEach(el => {
+    const on = todayOn(t, el.dataset.act, el.dataset.v);
+    if (on == null) return;
+    el.classList.toggle('on', on);
+    el.setAttribute('aria-pressed', on);
+  });
+  const pc = root.querySelector('[data-act="t-period"][data-v="1"]');
+  if (pc) pc.textContent = t.period ? `经期第 ${periodDay(t)} 天` : '经期中';
+  const openMed = t.island && a.meds.some(m => m.name === t.island);
+  root.querySelector('.meds-row')?.classList.toggle('has-open', !!openMed);
+  root.querySelectorAll('.mchip').forEach(el => {
+    const m = a.meds.find(x => x.name === el.dataset.name);
+    el.classList.toggle('sel', !!m);
+    el.classList.toggle('open', !!m && t.island === el.dataset.name);
+    el.querySelector('.mc-time span').textContent = m?.time || '几点';
+    el.querySelectorAll('.mc-eff button').forEach(b => b.classList.toggle('on', m?.effect === +b.dataset.v));
+  });
+  const btn = root.querySelector('.t-save');
+  btn.classList.toggle('done', !t.dirty && t.saved);
+  btn.innerHTML = saveLabel(t);
+}
+
+function saveToday() {
+  const t = todayState(), tk = t.date, a = t.a;
+  if (t.vas > 0) {
+    const start = parseLocal(a.start);
+    if (start > new Date(Date.now() + 5 * 60000)) return toast('开始时间不能晚于现在');
+    const rec = {
+      id: a.id || uid(), start: start.toISOString(), vas: t.vas, severity: sevOfVas(t.vas),
+      regions: a.regions, qualities: a.qualities, symptoms: a.symptoms, duration: a.duration, triggers: a.triggers,
+      meds: a.meds.map(({ id, name, dose, time, effect, relief }) => ({ id: id || uid(), name, dose, time, effect, relief })),
+      impact: a.impact ?? null, note: (a.note || '').trim(), createdAt: a.createdAt || Date.now(), updatedAt: Date.now(),
+    };
+    if (!a.regions.length && a.locations?.length) rec.locations = a.locations;
+    upsertAttack(rec);
+  } else if (a.id && state.attacks.some(x => x.id === a.id)) {
+    if (!confirm('疼痛选了 0，要删掉今天这次头痛记录吗？')) return;
+    deleteAttack(a.id);
+  }
+  const day = structuredClone(state.days[tk] || { date: tk });
+  if (t.vas === 0 && !attacksOn(tk).length) day.pain = 0; else delete day.pain;
+  if (t.sleep != null) day.sleep = t.sleep; else delete day.sleep;
+  day.period = t.period;
+  day.weather = t.weather;
+  // 饮品：只增删和这次选择不一致的，饮食记录里写过的备注保留
+  day.foods ||= [];
+  for (const x of DRINKS) {
+    const want = t.drinks.includes(x[0]), has = day.foods.some(f => drinkMatch(f, x));
+    if (want && !has) day.foods.push({ id: uid(), cat: x[1], item: x[2], note: '' });
+    if (!want && has) day.foods = day.foods.filter(f => !drinkMatch(f, x));
+  }
+  if (!t.drinks.includes('酒')) delete day.alcohol;
+  if (!day.foods.length) delete day.foods;
+  if (t.drinks.includes('none')) day.caffeine = 0; else if (day.caffeine === 0) delete day.caffeine;
+  saveDay(day);
+  ui.today = null;
+  try { localStorage.removeItem(TODAY_KEY); } catch { /* ignore */ }
+  render();
+  toast(t.vas > 0 ? '已保存，好好休息' : '已保存：今天没有头痛');
+}
+
 function viewHome() {
-  const now = new Date(), tk = todayKey();
+  const now = new Date();
   const h = now.getHours();
   const greet = h < 5 ? '夜深了' : h < 11 ? '早安' : h < 14 ? '午安' : h < 18 ? '午后安好' : h < 22 ? '晚风轻柔' : '夜深了';
   const name = (state.settings.name || '').trim();
   const streak = streakDays();
-  const done = TILES.filter(t => tileValue(t.k, tk)[0]).length;
   return `
-  ${header(`${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`, `${greet}${name ? '，' + esc(name) : ''}`,
+  <div class="home-sky">${header(`${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}`, `${greet}${name ? '，' + esc(name) : ''}`,
     `<div class="top-actions">${streak >= 2 ? `<span class="streak">${icon('sun', 15, 2)}${streak} 天</span>` : ''}
-      <button class="ai-pill" data-act="ai-quick" aria-label="用一段话让 AI 帮你记录">${icon('sparkle', 14, 2)}AI 记录</button>
-      <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}
+      <button class="avatar" data-act="tab" data-tab="me" aria-label="我的">${name ? esc([...name][0]) : icon('user', 20, 2)}</button></div>`)}</div>
   ${installBanner()}
-  ${heroCard()}
-  <div class="sec"><h2>今日小记</h2>
-    <svg class="check-ring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" style="stroke:var(--fill-2)" stroke-width="3"/>
-      ${done ? `<circle class="val" cx="11" cy="11" r="9" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(done / 6 * 56.5).toFixed(1)} 56.5"/>` : ''}</svg>
-    <span class="progress-text">${done}/6</span></div>
-  <div class="grid3">
-    ${TILES.map(t => {
-      const [ok, text] = tileValue(t.k, tk);
-      return `<button class="tile ${ok ? 'done' : ''}" data-act="tile" data-k="${t.k}" aria-label="${t.label}：${esc(text)}">
-        <span class="gl" style="--c:${t.color}">${icon(t.ic, 22, 1.8)}</span><b>${t.label}</b><span class="val">${esc(text)}</span>
-        ${ok ? `<i class="tick">${icon('check', 12, 3.2)}</i>` : ''}</button>`;
-    }).join('')}
-  </div>
-  <div class="sec"><h2>近 30 天</h2><span class="meta">本月 ${state.attacks.filter(a => S.attackDay(a).startsWith(tk.slice(0, 7))).length} 次</span></div>
-  ${trendCard()}`;
-}
-
-// 近 30 天：上方为疼痛强度柱（0–10），下方为睡眠折线（两个面板，各自一条轴）
-let trendPts = [];
-const TW = 320, TL = 22, TR = 4, TSLOT = (TW - TL - TR) / 30;
-const tx = i => TL + TSLOT * i + TSLOT / 2;
-
-function trendCard() {
-  const tk = todayKey(), byDay = S.indexAttacks(state.attacks);
-  trendPts = [];
-  for (let i = 29; i >= 0; i--) {
-    const k = shiftKey(tk, -i);
-    trendPts.push({ k, vas: maxVas(byDay.get(k) || []), sleep: state.days[k]?.sleep ?? null });
-  }
-  const base = 70, unit = 6, bw = 6, r = 2.5;
-  let bars = '';
-  trendPts.forEach((p, i) => {
-    if (!p.vas) return;
-    const x0 = tx(i) - bw / 2, y0 = base - Math.max(3, p.vas * unit);
-    bars += `<path class="bar-anim" d="M${x0} ${base}V${y0 + r}Q${x0} ${y0} ${x0 + r} ${y0}H${x0 + bw - r}Q${x0 + bw} ${y0} ${x0 + bw} ${y0 + r}V${base}Z" style="fill:var(--sev${sevOfVas(p.vas)});animation-delay:${(0.2 + i * 0.015).toFixed(3)}s"/>`;
-  });
-  const sy = s => 124 - (Math.max(4, Math.min(10, s)) - 4) / 6 * 34;
-  let path = '', dots = '';
-  trendPts.forEach((p, i) => {
-    if (p.sleep == null) return;
-    const prev = trendPts[i - 1]?.sleep, next = trendPts[i + 1]?.sleep;
-    path += `${prev == null ? 'M' : 'L'}${tx(i).toFixed(1)} ${sy(p.sleep).toFixed(1)}`;
-    if (prev == null && next == null) dots += `<circle cx="${tx(i)}" cy="${sy(p.sleep)}" r="3" style="fill:var(--accent)"/>`;
-  });
-  const last = [...trendPts].reverse().find(p => p.sleep != null);
-  if (last) dots += `<circle cx="${tx(trendPts.indexOf(last))}" cy="${sy(last.sleep)}" r="4" style="fill:var(--accent);stroke:var(--card);stroke-width:2"/>`;
-  const anyAttack = trendPts.some(p => p.vas), anySleep = !!last;
-  const short = k => md(k).replace('月', '/').replace('日', '');
-  return `<section class="card">
-    <div class="chart-wrap" data-chart="trend">
-      <svg viewBox="0 0 ${TW} 144" role="img" aria-label="近 30 天头痛强度与睡眠时长">
-        ${[5, 10].map(v => `<line class="grid-line" x1="${TL}" x2="${TW - TR}" y1="${base - v * unit}" y2="${base - v * unit}"/><text x="0" y="${base - v * unit + 3}">${v}</text>`).join('')}
-        <line x1="${TL}" x2="${TW - TR}" y1="${base}" y2="${base}" style="stroke:var(--fill-2)"/>
-        ${bars}
-        ${anyAttack ? '' : `<text x="${(TL + TW) / 2}" y="46" text-anchor="middle">近 30 天没有头痛</text>`}
-        <line class="grid-line" x1="${TL}" x2="${TW - TR}" y1="${sy(7)}" y2="${sy(7)}"/><text x="0" y="${sy(7) + 3}">7h</text>
-        ${anySleep ? `<path d="${path}" fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`
-          : `<text x="${(TL + TW) / 2}" y="${sy(7) - 6}" text-anchor="middle">在「睡眠」打卡后显示</text>`}
-        <line class="hl" x1="-10" x2="-10" y1="4" y2="126" style="stroke:var(--ink-3)" stroke-width="1" opacity="0"/>
-        <text x="${TL}" y="141">${short(trendPts[0].k)}</text>
-        <text x="${tx(15)}" y="141" text-anchor="middle">${short(trendPts[15].k)}</text>
-        <text x="${TW - TR}" y="141" text-anchor="end">今天</text>
-      </svg>
-      <div class="tip" role="status"></div>
-    </div>
-    <div class="legend">
-      <span><i class="sw" style="background:var(--sev1)"></i>轻 1–3</span>
-      <span><i class="sw" style="background:var(--sev2)"></i>中 4–6</span>
-      <span><i class="sw" style="background:var(--sev3)"></i>重 7–10</span>
-      <span><i class="line-key"></i>睡眠时长</span>
-    </div>
-  </section>`;
-}
-
-function bindTrend() {
-  const wrap = document.querySelector('[data-chart="trend"]');
-  if (!wrap) return;
-  const svg = wrap.querySelector('svg'), tip = wrap.querySelector('.tip'), hl = svg.querySelector('.hl');
-  let hideTimer;
-  const hide = () => { tip.classList.remove('show'); hl.setAttribute('opacity', '0'); };
-  const show = e => {
-    const rect = svg.getBoundingClientRect();
-    const i = Math.floor(((e.clientX - rect.left) / rect.width * TW - TL) / TSLOT);
-    if (i < 0 || i > 29) return hide();
-    const p = trendPts[i];
-    tip.innerHTML = `${md(p.k)}<br>${p.vas ? `头痛 ${p.vas}/10` : '无头痛'}${p.sleep != null ? ` · 睡眠 ${p.sleep}h` : ''}`;
-    tip.style.left = Math.max(22, Math.min(78, tx(i) / TW * 100)) + '%';
-    tip.classList.add('show');
-    hl.setAttribute('x1', tx(i)); hl.setAttribute('x2', tx(i)); hl.setAttribute('opacity', '.5');
-    clearTimeout(hideTimer);
-  };
-  svg.addEventListener('pointermove', show);
-  svg.addEventListener('pointerdown', show);
-  svg.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); else hideTimer = setTimeout(hide, 2500); });
+  ${todayCards()}`;
 }
 
 // ----------------------- 记录 -----------------------
 function viewRecords() {
   const list = state.attacks;
-  const head = header(list.length ? `共 ${list.length} 次头痛` : '还没有记录', '手记');
-  if (!list.length) {
-    return head + `<div class="empty"><div class="art">${icon('file', 38)}</div><h3>每一场头痛，都会安静地留在这里</h3>
-      <p>头痛时点「记下头痛」，滑一下强度、点一下部位，几秒钟就能记完；也可以在首页直接说一段。</p>
-      <button class="btn primary" data-act="new-attack">${icon('plus', 18, 2.2)}记下头痛</button></div>`;
-  }
+  const head = header(list.length ? `共 ${list.length} 次头痛` : '还没有头痛记录', '手记');
+  // 详细记录：都是选填，不算进首页的「记完」；以前的日子可以在「洞察」的日历里点日期补记
+  const row = (act, ic, color, t, sub, data = '') => `<button class="row" data-act="${act}" ${data}><span class="li-ic gl" style="--c:${color}">${icon(ic, 18, 2)}</span>
+    <div class="grow"><div class="t">${t}</div><div class="s">${sub}</div></div><span class="chev">${icon('chevR', 18)}</span></button>`;
+  const details = `<div class="group-label"><span>详细记录 · 选填</span></div>
+    <div class="group">
+      ${row('new-attack', 'cloud', 'var(--pain)', '完整头痛记录', '部位图、诱因、备注，也可以补记以前的')}
+      ${row('tile', 'heart', 'var(--t-stress)', '心情', '今天的心情，焦虑 / 抑郁自评', 'data-k="mood"')}
+      ${row('tile', 'bowl', 'var(--t-diet)', '饮食', '今天吃了什么、三餐', 'data-k="diet"')}
+      ${row('tile', 'stretch', 'var(--t-exercise)', '运动', '今天的运动时长、强度', 'data-k="exercise"')}
+      ${row('tile', 'pill', 'var(--t-meds)', '日常用药', '预防药等不在头痛时吃的药', 'data-k="meds"')}
+    </div>`;
+  if (!list.length) return head + details;
   const groups = new Map();
   for (const a of list) {
     const k = S.attackDay(a).slice(0, 7);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(a);
   }
-  let html = head;
+  let html = head + details;
   for (const [k, arr] of groups) {
     const [y, m] = k.split('-');
     html += `<div class="group-label"><span>${y}年${+m}月</span><span>${arr.length} 次 · 平均 ${fmtNum(mean(arr.map(vasOf)))} 分</span></div>
@@ -474,7 +541,7 @@ function calendarCard() {
       <span class="n">${i}</span><span class="marks">${d?.period ? '<i class="p"></i>' : ''}${meds ? '<i class="m"></i>' : ''}</span></button>`;
   }
   return `<section class="card">
-    <div class="card-head"><h3>头痛日历</h3><span class="meta">点日期查看或补记</span></div>
+    <div class="card-head"><h3>头痛日历</h3><span class="meta">点日期看这天的全部记录</span></div>
     <div class="cal">${cells}</div>
     <div class="legend">
       <span><i class="dot" style="background:var(--sev1)"></i>轻</span>
@@ -487,31 +554,53 @@ function calendarCard() {
   </section>`;
 }
 
+// 点日历上的某一天：列出这天记过的所有内容（兼容各个版本的旧字段）
 function dayDetail(k) {
   if (!k || k.slice(0, 7) !== dkey(ui.month).slice(0, 7) || k > todayKey()) return '';
-  const atk = attacksOn(k), d = state.days[k] || {}, doses = dosesOn(k);
-  const pills = [];
-  if (d.pain === 0 && !atk.length) pills.push('<span class="pill">没有头痛</span>');
-  if (d.period) pills.push(`<span class="pill"><i class="bar-key" style="background:var(--period)"></i>经期第 ${S.periodDayNumber(state.days, k)} 天</span>`);
-  if (d.sleep != null) pills.push(`<span class="pill">睡眠 ${d.sleep}h</span>`);
-  if (d.mood?.valence) pills.push(`<span class="pill">心情：${MOOD_SHORT[d.mood.valence - 1]}</span>`);
-  else if (d.stress) pills.push(`<span class="pill">压力${STRESS[d.stress]}</span>`);
-  for (const f of (d.foods || []).slice(0, 4)) pills.push(`<span class="pill">${esc(f.item)}</span>`);
-  for (const w of (d.workouts || []).slice(0, 2)) pills.push(`<span class="pill">${esc(w.item)}</span>`);
-  if (d.meals) pills.push(`<span class="pill">吃了 ${MEALS.filter(([m]) => d.meals[m]).length} 餐</span>`);
-  if (S.caffeineOf(d)) pills.push(`<span class="pill">咖啡因 ${S.caffeineOf(d)} 杯</span>`);
-  if (S.alcoholOf(d) && !(d.foods || []).some(f => f.cat === '酒类')) pills.push('<span class="pill">饮酒</span>');
-  if (d.exercise != null) pills.push(`<span class="pill">${d.exercise ? `运动 ${d.exercise} 分钟` : '没运动'}</span>`);
-  if (doses.length) pills.push(`<span class="pill"><i class="dot" style="background:var(--med);width:6px;height:6px"></i>${doses.map(m => esc(m.name)).join('、')}</span>`);
+  const atk = attacksOn(k).slice().reverse(), d = state.days[k] || {};
+  const kv = (label, value) => value ? `<div class="dd-row"><span>${label}</span><div>${value}</div></div>` : '';
+  const list = arr => (arr || []).filter(Boolean).map(esc).join('、');
+  const medLine = m => [`${esc(m.name)}${m.dose ? ' ' + esc(m.dose) : ''}`, m.time ? esc(m.time) : '',
+    m.effect != null ? EFFECTS[m.effect].label + (m.effect > 0 && m.relief ? `（${m.relief < 1 ? '半小时' : m.relief + ' 小时'}起效）` : '') : ''].filter(Boolean).join(' · ');
+  const attacks = atk.map(a => {
+    const v = vasOf(a), dur = durationOf(a.duration);
+    return `<div class="dd-block">
+      <button class="dd-head" data-act="edit-attack" data-id="${a.id}"><span class="vb s${sevOfVas(v)}">${v}</span>
+        <b>${hhmm(new Date(a.start))} 开始头痛</b><span class="muted">${vasWord(v)}</span><span class="chev">${icon('chevR', 16)}</span></button>
+      ${kv('持续', dur ? esc(dur.label) : '')}
+      ${kv('部位', esc(regionSummary(a)))}
+      ${kv('性质', list(a.qualities))}
+      ${kv('伴随', list(a.symptoms))}
+      ${kv('用药', (a.meds || []).map(medLine).join('<br>'))}
+      ${kv('影响', a.impact != null ? IMPACT[a.impact] : '')}
+      ${kv('诱因', list(a.triggers))}
+      ${kv('备注', a.note ? esc(a.note) : '')}
+    </div>`;
+  }).join('');
+  const foods = (d.foods || []).map(f => `${esc(f.item)}${f.note ? `（${esc(f.note)}）` : ''}`).join('、');
+  const mood = d.mood ? [d.mood.valence ? MOOD[d.mood.valence - 1] : '', list(d.mood.feelings), d.mood.factors?.length ? `受${list(d.mood.factors)}影响` : ''].filter(Boolean).join(' · ') : '';
+  const ex = [d.exercise != null ? (d.exercise ? `${d.exercise} 分钟` : '没有运动') : '', d.exIntensity ? INTENSITY[d.exIntensity] : '', (d.workouts || []).map(w => esc(w.item)).join('、')].filter(Boolean).join(' · ');
+  const dayRows = [
+    d.pain === 0 && !atk.length ? kv('头痛', '没有头痛') : '',
+    kv('睡眠', d.sleep != null ? `${d.sleep} 小时` : ''),
+    kv('饮食', foods),
+    kv('咖啡因', S.caffeineOf(d) ? `${S.caffeineOf(d)} 杯` : d.caffeine === 0 ? '没有' : ''),
+    kv('饮酒', S.alcoholOf(d) && !(d.foods || []).some(f => f.cat === '酒类') ? '喝了酒' : ''),
+    kv('三餐', d.meals ? MEALS.map(([m, l]) => `${l}${d.meals[m] ? '吃了' : '没吃'}`).join('，') : ''),
+    kv('月经', d.period ? `经期第 ${S.periodDayNumber(state.days, k)} 天` : d.period === false ? '不在经期' : ''),
+    kv('天气', d.weather ? '变天了' : d.weather === false ? '没有变化' : ''),
+    kv('心情', mood || (d.stress ? `压力${STRESS[d.stress]}` : '')),
+    kv('运动', ex),
+    kv('日常用药', (d.meds || []).map(medLine).join('<br>')),
+    kv('自评', [d.gad7 ? `GAD-7 ${d.gad7.score} 分（${scaleBand('gad7', d.gad7.score)}）` : '', d.phq9 ? `PHQ-9 ${d.phq9.score} 分（${scaleBand('phq9', d.phq9.score)}）` : ''].filter(Boolean).join('<br>')),
+  ].join('');
   return `<div class="day-detail">
     <h4>${mdw(k)}</h4>
-    ${atk.map(a => `<button class="mini-rec" data-act="edit-attack" data-id="${a.id}"><span class="vb s${sevOfVas(vasOf(a))}">${vasOf(a)}</span>
-      <span class="grow">${hhmm(new Date(a.start))} · ${esc([regionSummary(a), a.qualities?.[0], a.duration ? durationOf(a.duration).label : ''].filter(Boolean).join(' · ') || vasWord(vasOf(a)))}</span>
-      <span class="chev">${icon('chevR', 16)}</span></button>`).join('')}
-    ${pills.length ? `<div class="kv">${pills.join('')}</div>` : atk.length ? '' : '<p class="muted" style="margin:0;font-size:14px">这天没有记录</p>'}
+    ${attacks}
+    ${dayRows ? `<div class="dd-block">${dayRows}</div>` : atk.length ? '' : '<p class="muted" style="margin:0;font-size:14px">这天没有记录</p>'}
     <div class="btn-row">
       <button class="btn pain" data-act="new-attack" data-k="${k}">${icon('plus', 18, 2.2)}补记头痛</button>
-      <button class="btn tint" data-act="edit-day" data-k="${k}">${icon('edit', 18)}编辑打卡</button>
+      <button class="btn tint" data-act="edit-day" data-k="${k}">${icon('edit', 18)}编辑这天</button>
     </div></div>`;
 }
 
@@ -823,9 +912,6 @@ function viewMe() {
     ${s.customTriggers.map((t, i) => `<div class="row plain"><div class="grow t">${esc(t)}</div><button class="icon-btn" data-act="trig-del" data-i="${i}" aria-label="删除 ${esc(t)}">${icon('trash', 18)}</button></div>`).join('')}
   </div>` : ''}
 
-  <div class="group-label"><span>一句话记录</span></div>
-  <div class="group">${row('ai-open', 'sparkle', 'var(--t-sleep)', 'AI 记录（可选）', aiStatus())}</div>
-
   <div class="group-label"><span>数据</span></div>
   <div class="group">
     ${row('report', 'file', 'var(--accent)', '就诊摘要', '近 90 天的头痛、用药和规律，看医生时直接给医生看')}
@@ -840,13 +926,8 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.7</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.8</div></div></div>
   </div>`;
-}
-
-function aiStatus() {
-  const c = aiConf(state.ai);
-  return aiReady(c) ? `已设置 · ${esc(c.label)} · ${esc(c.model)}` : '未设置 · 设置后可以在首页用一段话记录';
 }
 
 async function updatePersistInfo() {
@@ -932,199 +1013,11 @@ const SHEETS = {
   categorize: () => ({ full: true, title: '给记录分类', body: categorizeBody(), foot: doneFoot }),
   ifactor: s => ifactorSheet(s.k),
   method: () => ({ full: true, title: '分析方法说明', body: methodBody() }),
-  quick: s => ({ full: true, title: '听到了这些', body: quickBody(s), foot: quickFoot(s) }),
-  aiq: s => ({ title: 'AI 记录', body: aiqBody(s), foot: aiqFoot(s) }),
-  ai: () => ({ full: true, title: 'AI 记录设置', body: aiBody(), foot: doneFoot }),
   report: () => ({
     full: true, title: '就诊摘要',
     body: `<pre class="report">${esc(buildReport())}</pre>`,
     foot: `<div class="btn-row" style="margin:0"><button class="btn tint" data-act="copy-report">${icon('copy', 18)}复制</button><button class="btn primary" data-act="share-report">${icon('share', 18)}分享</button></div>`,
   }),
-};
-
-// ======================= 一句话记录：确认页 =======================
-const Q_TILE = { period: ['period'], diet: ['meal', 'food'], sleep: ['sleep'], mood: ['valence', 'feel', 'factor'], exercise: ['ex', 'exmin', 'exint', 'noex'], meds: ['med'] };
-const Q_STEP = { vas: [1, 1, 10], sleep: [0.5, 0, 16], exmin: [5, 5, 600], valence: [1, 1, 7] };
-const A_ORDER = ['start', 'vas', 'region', 'quality', 'symptom', 'duration', 'trigger', 'med', 'medeffect', 'note'];
-// 识别时的参照：常用药、自定义诱因，以及以往头痛的日期和分数（用来换算“比昨天轻一点”；只在手机上用，不发给 AI）
-const qctx = () => ({
-  now: new Date(), meds: state.settings.meds, customTriggers: state.settings.customTriggers,
-  attacks: state.attacks.map(a => ({ day: S.attackDay(a), vas: vasOf(a), meds: (a.meds || []).length })),
-});
-
-function qChip(s, it) {
-  const i = s.res.items.indexOf(it), cls = `chip qi ${it.on ? 'on' : ''} ${it.fuzzy ? 'fuzzy' : ''}`;
-  const mark = it.fuzzy ? '<i class="q-guess" aria-label="猜测">?</i>' : '';
-  if (Q_STEP[it.k]) {
-    return `<span class="${cls} step"><button data-act="qi-step" data-i="${i}" data-d="-1" aria-label="减少">−</button><button class="q-lbl" data-act="qi-toggle" data-i="${i}" aria-pressed="${it.on}">${mark}${esc(itemText(it))}</button><button data-act="qi-step" data-i="${i}" data-d="1" aria-label="增加">+</button></span>`;
-  }
-  return `<button class="${cls}" data-act="qi-toggle" data-i="${i}" aria-pressed="${it.on}">${mark}${esc(itemText(it))}</button>`;
-}
-function attachDefault(res) {
-  const st = res.items.find(x => x.k === 'start');
-  const ex = attacksOn(st ? st.v.slice(0, 10) : todayKey());
-  return ex.length && (!st || st.noTime) ? ex[0].id : null;
-}
-function quickBody(s) {
-  const items = s.res.items, hasA = items.some(x => x.k === 'head');
-  const A = items.filter(x => x.g === 'a' && x.k !== 'head');
-  const days = [...new Set(items.filter(x => x.g === 'd').map(x => x.date))].sort().reverse();
-  let html = `<section class="card q-said"><h4>你说的<span class="badge accent">AI 理解</span></h4>
-    <p class="q-said-text">${esc(s.text)}</p></section>`;
-  if (!hasA && !days.length) {
-    return html + `<section class="card"><p class="sub" style="margin:0">AI 没有听出可以记录的内容。可以说说几点开始疼、疼几分、哪里疼、吃了什么药，或者昨晚睡了多久、吃了什么、心情怎样。</p></section>`;
-  }
-  if (hasA) {
-    const st = A.find(x => x.k === 'start'), aDate = st ? st.v.slice(0, 10) : todayKey(), ex = attacksOn(aDate);
-    const generic = A.filter(x => x.k === 'med' && x.on && x.v.generic);
-    const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
-    html += `<section class="card q-sec ${s.attackOn ? '' : 'off'}">
-      <div class="q-h"><span class="gl" style="--c:var(--pain)">${icon('cloud', 16, 1.9)}</span><b>一次头痛</b><small>${dayWord(aDate)}</small>
-        <button class="switch ${s.attackOn ? 'on' : ''}" role="switch" aria-checked="${s.attackOn}" data-act="q-attack" aria-label="记录这次头痛"></button></div>
-      ${!s.attackOn ? '<p class="note" style="margin:0">这次不记头痛，只保存下面的小记。</p>' : `
-      ${ex.length ? `<div class="seg-ctl q-attach"><button class="${!s.attachTo ? 'on' : ''}" data-act="q-attach" data-v="">记为新的一次</button><button class="${s.attachTo === ex[0].id ? 'on' : ''}" data-act="q-attach" data-v="${ex[0].id}">补充到 ${hhmm(new Date(ex[0].start))} 那次</button></div>` : ''}
-      <div class="chips">${A_ORDER.flatMap(k => A.filter(x => x.k === k)).map(it => qChip(s, it)).join('')}</div>
-      ${generic.map(it => `<div class="q-sub"><span>没听清是哪种药，选一下：</span><div class="chips">${presets.map(p => `<button class="chip mini ${it.v.name === p.name ? 'on' : ''}" data-act="qi-med" data-i="${items.indexOf(it)}" data-name="${esc(p.name)}" data-dose="${esc(p.dose)}" data-kind="${p.kind}">${esc(p.name)}</button>`).join('')}</div></div>`).join('')}
-      ${(s.res.notes || []).map(n => `<p class="note">${esc(n)}</p>`).join('')}
-      ${!A.some(x => x.k === 'vas') && !s.attachTo && !(s.res.notes || []).length ? '<p class="note">没听出疼痛强度，下一步拖动滑块选一下。</p>' : ''}
-      ${A.some(x => x.k === 'vas' && (x.phrase || x.cmp)) ? '<p class="note">分数是按你的说法估的；和别的时候比的，按那次的记录加减。用 − / + 调到合适的分数。</p>' : ''}`}
-    </section>`;
-  }
-  for (const d of days) {
-    const list = items.filter(x => x.g === 'd' && x.date === d);
-    const rows = TILES.map(t => {
-      const its = list.filter(x => Q_TILE[t.k].includes(x.k));
-      return its.length ? `<div class="q-row"><span class="gl" style="--c:${t.color}" title="${t.label}">${icon(t.ic, 15, 2.2)}</span><div class="chips">${its.map(it => qChip(s, it)).join('')}</div></div>` : '';
-    }).join('');
-    const np = list.filter(x => x.k === 'nopain');
-    html += `<section class="card q-sec"><div class="q-h"><b>${dayWord(d)}的小记</b><small>${md(d)}</small></div>
-      ${np.length ? `<div class="q-row"><span class="gl" style="--c:var(--t-exercise)">${icon('check', 15, 2.4)}</span><div class="chips">${np.map(it => qChip(s, it)).join('')}</div></div>` : ''}${rows}</section>`;
-  }
-  return html + '<p class="note q-legend">点一下可以取消或恢复；带 <i class="q-guess">?</i> 的是猜的，请确认。保存后都还能在原来的地方修改。</p>';
-}
-function quickFoot(s) {
-  const n = s.res.items.filter(x => x.on && x.g === 'd').length, atk = s.attackOn && s.res.items.some(x => x.k === 'head');
-  const label = atk ? (n ? `保存 ${n} 项小记，再确认头痛` : '下一步：确认头痛记录') : n ? `保存 ${n} 项小记` : '没有可保存的内容';
-  return `<button class="btn primary lg block" data-act="q-apply" ${atk || n ? '' : 'disabled style="opacity:.45"'}>${label}</button>`;
-}
-
-// 保存：小记直接写进对应日期；有头痛时打开填好的头痛表单，由用户确认后保存
-function applyQuick() {
-  const s = ui.sheet, items = s.res.items.filter(x => x.on);
-  const attackOn = s.attackOn && items.some(x => x.k === 'head');
-  const A = attackOn ? items.filter(x => x.g === 'a') : [];
-  const st = A.find(x => x.k === 'start'), aDate = attackOn ? (st ? st.v.slice(0, 10) : todayKey()) : null;
-  const byDate = {};
-  for (const it of items) if (it.g === 'd') (byDate[it.date] ||= []).push(it);
-  let n = 0;
-  for (const [date, list] of Object.entries(byDate)) {
-    const day = structuredClone(state.days[date] || { date });
-    let extraCaf = 0;
-    const mood = () => { day.mood = { feelings: [], factors: [], ...(day.mood || {}) }; day.mood.feelings ||= []; day.mood.factors ||= []; return day.mood; };
-    for (const it of list) {
-      const v = it.v;
-      switch (it.k) {
-        case 'sleep': day.sleep = v; break;
-        case 'meal': day.meals ||= { b: false, l: false, d: false }; day.meals[v.m] = v.ate; break;
-        case 'food':
-          (day.foods ||= []).push({ id: uid(), cat: v.cat, item: v.item, note: v.note || '' });
-          if (CAFFEINE_ITEMS.includes(v.item) && v.qty > 1) extraCaf += v.qty - 1;
-          break;
-        case 'ex': (day.workouts ||= []).push({ id: uid(), cat: v.cat, item: v.item, note: v.note || '' }); break;
-        case 'exmin': day.exercise = v; break;
-        case 'exint': day.exIntensity = v; break;
-        case 'noex': if (!(day.workouts || []).length) day.exercise = 0; break;
-        case 'valence': mood().valence = v; break;
-        case 'feel': if (!mood().feelings.includes(v)) day.mood.feelings.push(v); break;
-        case 'factor': if (!mood().factors.includes(v)) day.mood.factors.push(v); break;
-        case 'period': day.period = v; break;
-        case 'nopain': if (!attacksOn(date).length && aDate !== date) day.pain = 0; break;
-        case 'med': (day.meds ||= []).push({ id: uid(), name: v.name, dose: v.dose || '', kind: v.kind || 'acute', time: v.time || hhmm(new Date()) }); break;
-      }
-      n++;
-    }
-    if (extraCaf) day.caffeine = Math.max(day.caffeine ?? 0, (day.foods || []).filter(f => CAFFEINE_ITEMS.includes(f.item)).length + extraCaf);
-    saveDay(day);
-  }
-  ui.qeText = '';
-  try { localStorage.removeItem('qe-draft'); } catch { /* ignore */ }
-  if (!attackOn) {
-    closeSheet(true);
-    toast(n ? `已记下 ${n} 项小记` : '没有需要保存的内容');
-    return;
-  }
-  const target = s.attachTo && state.attacks.find(a => a.id === s.attachTo);
-  const d = target ? { ...structuredClone(target), start: toLocalInput(new Date(target.start)) } : newAttackDraft(aDate);
-  if (!target && st) d.start = st.v;
-  d.note ??= '';
-  for (const k of ['regions', 'qualities', 'symptoms', 'triggers', 'meds']) d[k] ||= [];
-  const add = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
-  const start = parseLocal(d.start), sameDay = start.toDateString() === new Date().toDateString();
-  for (const it of A) {
-    const v = it.v;
-    switch (it.k) {
-      case 'vas': d.vas = v; break;
-      case 'region': v.forEach(r => add(d.regions, r)); break;
-      case 'quality': add(d.qualities, v); break;
-      case 'symptom': add(d.symptoms, v); break;
-      case 'trigger': add(d.triggers, v); break;
-      case 'duration': d.duration = v; break;
-      case 'med': d.meds.push({ id: uid(), name: v.name, dose: v.dose || '', time: v.time || (sameDay ? hhmm(new Date()) : hhmm(start)), effect: v.effect ?? null, relief: v.relief ?? null }); break;
-      case 'medeffect': {
-        // “比吃药前好点了”：记到这次头痛里最近吃的那种药上
-        const m = [...d.meds].reverse().find(x => x.effect == null) || d.meds[d.meds.length - 1];
-        if (m) { m.effect = v; if (!(v > 0)) m.relief = null; }
-        break;
-      }
-      case 'note': d.note = d.note ? `${d.note}\n${v}` : v; break;
-    }
-  }
-  openSheet({ type: 'attack', draft: d, dirty: true });
-  toast(n ? `已记下 ${n} 项小记，请确认这次头痛` : '已帮你填好，确认后点保存');
-}
-
-// ======================= AI 记录（输入一段话） =======================
-function aiqBody(s) {
-  const c = aiConf(state.ai);
-  if (!aiReady(c)) {
-    return `<section class="card"><p class="sub" style="margin:0">用一段话说说头痛和今天的情况，AI 会帮你选好对应的选项，你确认后再保存。</p>
-      <p class="note">需要先接入你自己的 AI 服务（DeepSeek、通义千问、Claude 等），在「我的 → AI 记录」里设置。</p></section>`;
-  }
-  return `<section class="card">
-      <textarea class="field qe-text" data-input="qe-text" rows="6" aria-label="用一段话描述头痛和今天的情况" placeholder="比如：下午三点左边太阳穴跳着疼，比昨天轻一点，吃了布洛芬，半小时后好点了；昨晚只睡了 5 小时，中午喝了杯奶茶。" ${s.busy ? 'disabled' : ''}>${esc(ui.qeText)}</textarea>
-      <p class="note">点键盘上的麦克风就能用语音输入。发给 ${esc(c.label)} 的只有这段话，识别结果会先给你确认。</p>
-      ${s.err ? `<div class="q-ai err">AI 没能识别：${esc(s.err)}</div>` : ''}
-    </section>`;
-}
-function aiqFoot(s) {
-  if (!aiReady(aiConf(state.ai))) return `<button class="btn primary lg block" data-act="ai-open">去设置 AI</button>`;
-  return s.busy
-    ? `<button class="btn primary lg block" disabled><span class="spin light" aria-hidden="true"></span>AI 正在理解……</button>`
-    : `<button class="btn primary lg block" data-act="aiq-send">${icon('sparkle', 18, 2)}交给 AI 识别</button>`;
-}
-
-// ======================= AI 设置 =======================
-function aiBody() {
-  const a = state.ai, P = AI_PRESETS[a.preset], c = aiConf(a), s = ui.sheet;
-  const f = (id, label, val, extra) => `<label class="f-lbl" for="${id}">${label}</label><input class="field" id="${id}" data-input="${id}" value="${esc(val)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ${extra}>`;
-  return `<section class="card"><p class="sub" style="margin:0">设置好后，在首页点「AI 记录」，用一段话说说头痛和今天的情况，AI 会帮你选好选项，你确认后再保存。需要你自己的 AI 服务密钥。</p></section>
-    <section class="card"><h4>AI 服务</h4>
-      <div class="chips">${Object.entries(AI_PRESETS).map(([k, p]) => `<button class="chip ${a.preset === k ? 'on' : ''}" data-act="ai-preset" data-v="${k}" aria-pressed="${a.preset === k}">${p.label}</button>`).join('')}</div>
-      ${P ? `<p class="note">${P.hint}</p>
-        ${f('ai-url', '接口地址', c.url, 'inputmode="url" placeholder="https://…/v1"')}
-        ${f('ai-key', 'API 密钥', c.key, 'type="password" placeholder="粘贴你的密钥"')}
-        ${f('ai-model', '模型', c.model, 'placeholder="模型名称"')}
-        <div class="btn-row"><button class="btn tint" data-act="ai-test" ${s.testing ? 'disabled' : ''}>${s.testing ? '测试中……' : '测试一下'}</button>${c.key ? '<button class="btn" data-act="ai-clear">删除密钥</button>' : ''}</div>
-        ${s.testMsg ? `<p class="note ${s.testOk ? 'ok' : 'err'}">${esc(s.testMsg)}</p>` : ''}`
-      : '<p class="note">先选一个服务。在国内网络下，DeepSeek 和通义千问通常更顺畅。</p>'}
-    </section>
-    <section class="card"><h4>隐私与费用</h4><p class="sub">密钥只保存在这台手机上，不会出现在导出的备份里。发给 AI 的只有你这次输入的那段话和选项清单，不包含其他任何记录；服务商会按自己的隐私政策处理。调用按服务商的价格计费。</p></section>`;
-}
-const aiField = (k, v) => {
-  const c = (state.ai.cfg[state.ai.preset] ||= {});
-  c[k] = v;
-  clearTimeout(INPUTS.at);
-  INPUTS.at = setTimeout(saveAI, 300);
 };
 
 function vasWidget(v) {
@@ -1469,6 +1362,8 @@ function buildReport() {
   lines.push(`· 疼痛性质：${count(list.flatMap(a => a.qualities || []))}`);
   lines.push(`· 伴随症状：${count(list.flatMap(a => a.symptoms || []))}`);
   lines.push(`· 自己认为的诱因：${count(list.flatMap(a => a.triggers || []))}`);
+  const imp = list.filter(a => a.impact != null);
+  if (imp.length) lines.push(`· 对日常的影响（上班、带孩子）：${IMPACT.map((l, i) => `${l} ${imp.filter(a => a.impact === i).length}`).join('，')}`);
   const M = S.medStats({ ...state, attacks: list }, new Date());
   if (M.list.length) lines.push('· 用药：' + M.list.map(s => `${s.name} ${s.uses} 次${s.rated ? `，有效 ${s.full + s.partial}/${s.rated}` : ''}`).join('；'));
   lines.push(`· 每月止痛药使用天数：${[2, 1, 0].map(i => { const m = addMonths(startOfMonth(new Date()), -i); return `${m.getMonth() + 1}月 ${S.medStats(state, m).acuteDays} 天`; }).join('，')}`);
@@ -1490,7 +1385,7 @@ function buildReport() {
   for (const a of list) {
     const d = new Date(a.start);
     const meds = (a.meds || []).map(m => `${m.name}${m.dose ? ' ' + m.dose : ''}${m.effect != null ? '，' + EFFECTS[m.effect].label : ''}`).join('；');
-    lines.push(`${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)} 强度${vasOf(a)} ${a.duration ? durationOf(a.duration).label : ''} ${regionSummary(a)} ${(a.qualities || []).join('、')} ${(a.symptoms || []).join('、')}${meds ? ' | ' + meds : ''}`.replace(/\s+/g, ' ').trim());
+    lines.push(`${d.getMonth() + 1}/${d.getDate()} ${hhmm(d)} 强度${vasOf(a)} ${a.duration ? durationOf(a.duration).label : ''} ${regionSummary(a)} ${(a.qualities || []).join('、')} ${(a.symptoms || []).join('、')}${a.impact != null ? ' 影响：' + IMPACT[a.impact] : ''}${meds ? ' | ' + meds : ''}`.replace(/\s+/g, ' ').trim());
   }
   if (!list.length) lines.push('（无）');
   lines.push('', '由「偏晴 · 偏头痛日记」生成，仅供参考。');
@@ -1512,7 +1407,7 @@ async function shareOrDownload(name, text, type) {
 
 function exportCSV() {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['日期', '强度(0-10)', '开始时间', '持续', '侧别', '部位', '性质', '伴随症状', '诱因', '用药', '睡眠(小时)', '心情(1-7)', '感受', '心情影响因素', '压力', '三餐', '饮食记录', '咖啡因(杯)', '饮酒', '运动(分钟)', '运动强度', '运动记录', '经期', '无头痛', 'GAD-7', 'PHQ-9', '备注'];
+  const head = ['日期', '强度(0-10)', '开始时间', '持续', '侧别', '部位', '性质', '伴随症状', '诱因', '用药', '影响日常', '睡眠(小时)', '心情(1-7)', '感受', '心情影响因素', '压力', '三餐', '饮食记录', '咖啡因(杯)', '饮酒', '运动(分钟)', '运动强度', '运动记录', '经期', '天气变化', '无头痛', 'GAD-7', 'PHQ-9', '备注'];
   const logText = list => (list || []).map(e => `${e.cat}·${e.item}${e.note ? `（${e.note}）` : ''}`).join('; ');
   const keys = [...new Set([...Object.keys(state.days), ...state.attacks.map(S.attackDay)])].sort();
   const rows = [head.map(q).join(',')];
@@ -1522,14 +1417,14 @@ function exportCSV() {
     const daily = [d.sleep, d.mood?.valence ?? '', (d.mood?.feelings || []).join('/'), (d.mood?.factors || []).join('/'), st ? STRESS[st] : '',
       d.meals ? MEALS.filter(([m]) => d.meals[m]).map(([, l]) => l).join('/') : '', logText(d.foods),
       S.caffeineOf(d) ?? '', S.alcoholOf(d) == null ? '' : S.alcoholOf(d) ? '是' : '否', d.exercise, d.exIntensity ? INTENSITY[d.exIntensity] : '', logText(d.workouts),
-      d.period ? '是' : '', d.pain === 0 ? '是' : '', d.gad7?.score ?? '', d.phq9?.score ?? ''];
+      d.period ? '是' : '', d.weather == null ? '' : d.weather ? '是' : '否', d.pain === 0 ? '是' : '', d.gad7?.score ?? '', d.phq9?.score ?? ''];
     const extraMeds = (d.meds || []).map(m => `${m.name} ${m.dose || ''}${m.time ? ' ' + m.time : ''}`).join('; ');
-    if (!atks.length) rows.push([k, '', '', '', '', '', '', '', '', extraMeds, ...daily, ''].map(q).join(','));
+    if (!atks.length) rows.push([k, '', '', '', '', '', '', '', '', extraMeds, '', ...daily, ''].map(q).join(','));
     for (const a of atks.slice().reverse()) {
       const meds = [...(a.meds || []).map(m => `${m.name} ${m.dose || ''}${m.time ? ' ' + m.time : ''}${m.effect != null ? ' ' + EFFECTS[m.effect].label : ''}`), extraMeds].filter(Boolean).join('; ');
       const regions = a.regions?.length ? a.regions.map(r => REGIONS[r]?.label).join('/') : (a.locations || []).join('/');
       rows.push([k, vasOf(a), hhmm(new Date(a.start)), a.duration ? durationOf(a.duration).label : '', LAT_LABEL[laterality(a)] || '', regions,
-        (a.qualities || []).join('/'), (a.symptoms || []).join('/'), (a.triggers || []).join('/'), meds, ...daily, a.note].map(q).join(','));
+        (a.qualities || []).join('/'), (a.symptoms || []).join('/'), (a.triggers || []).join('/'), meds, a.impact != null ? IMPACT[a.impact] : '', ...daily, a.note].map(q).join(','));
     }
   }
   shareOrDownload(`偏晴-偏头痛日记-${todayKey()}.csv`, '﻿' + rows.join('\r\n'), 'text/csv');
@@ -1584,67 +1479,49 @@ const touch = () => { ui.sheet.dirty = true; renderSheet(); };
 const ACTIONS = {
   tab: el => { ui.tab = el.dataset.tab; render(); },
 
-  // ---- AI 记录 ----
-  'ai-quick': () => openSheet({ type: 'aiq' }),
-  'aiq-send': async () => {
-    const s = ui.sheet, text = (ui.qeText || '').trim();
-    if (!text) { $sheet.querySelector('.qe-text')?.focus(); return toast('先写一句，或点键盘上的麦克风说一句'); }
-    s.busy = true; s.err = null; renderSheet();
-    try {
-      const res = fromAI(await aiParse(aiConf(state.ai), text, qctx()), text, qctx());
-      if (ui.sheet !== s) return;
-      openSheet({ type: 'quick', text, res, attackOn: true, attachTo: attachDefault(res), edited: false, dirty: false });
-    } catch (e) {
-      s.busy = false; s.err = e?.message || String(e);
-      if (ui.sheet === s) renderSheet();
-    }
-  },
-  'qi-toggle': el => { const it = ui.sheet.res.items[+el.dataset.i]; it.on = !it.on; ui.sheet.edited = true; renderSheet(); },
-  'qi-step': el => {
-    const it = ui.sheet.res.items[+el.dataset.i], [st, lo, hi] = Q_STEP[it.k];
-    it.v = Math.max(lo, Math.min(hi, +(it.v + st * +el.dataset.d).toFixed(1)));
-    it.on = true; it.fuzzy = false; ui.sheet.edited = true; renderSheet();
-  },
-  'qi-med': el => {
-    const it = ui.sheet.res.items[+el.dataset.i];
-    Object.assign(it.v, { name: el.dataset.name, dose: el.dataset.dose, kind: el.dataset.kind, generic: false });
-    it.fuzzy = false; it.on = true; ui.sheet.edited = true; renderSheet();
-  },
-  'q-attack': () => { ui.sheet.attackOn = !ui.sheet.attackOn; ui.sheet.edited = true; renderSheet(); },
-  'q-attach': el => { ui.sheet.attachTo = el.dataset.v || null; renderSheet(); },
-  'q-apply': () => applyQuick(),
-  'ai-open': () => openSheet({ type: 'ai' }),
-  'ai-preset': el => { state.ai.preset = el.dataset.v; state.ai.cfg[el.dataset.v] ||= {}; ui.sheet.testMsg = null; saveAI(); renderSheet(); },
-  'ai-clear': () => {
-    if (!confirm('删除这个服务的密钥？')) return;
-    state.ai.cfg[state.ai.preset].key = ''; saveAI(); ui.sheet.testMsg = null; renderSheet();
-  },
-  'ai-test': async () => {
-    const c = aiConf(state.ai), s = ui.sheet;
-    if (!c?.url || !c.key || !c.model) return toast('请先填好接口地址、密钥和模型');
-    s.testing = true; s.testMsg = null; renderSheet();
-    const sample = '下午三点左边太阳穴一跳一跳地疼，大概 6 分，吃了布洛芬，半小时后好多了';
-    try {
-      const r = fromAI(await aiParse(c, sample, qctx()), sample, qctx());
-      const n = r.items.filter(x => x.k !== 'head' && x.k !== 'note').length;
-      s.testOk = n > 0;
-      s.testMsg = n ? `连接成功，从示例句子里识别出 ${n} 项。` : '连上了，但没有识别出内容，可以换个模型试试。';
-    } catch (e) { s.testOk = false; s.testMsg = e?.message || String(e); }
-    s.testing = false;
-    if (ui.sheet === s) renderSheet();
-  },
   'hide-install': () => { state.settings.hideInstall = true; saveSettings(); render(); },
 
-  'no-pain': () => {
-    const tk = todayKey();
-    if (attacksOn(tk).length) return toast('今天已有头痛记录');
-    const day = structuredClone(state.days[tk] || { date: tk });
-    day.pain = 0;
-    saveDay(day);
-    ui.heroEnter = true;
-    render();
-    toast('已记录：今天没有头痛');
+  // ---- 今天（一屏记完）：都在原地更新 ----
+  't-side': el => editToday(({ a }) => {
+    const v = el.dataset.v, cur = sideOf(a);
+    a.regions = []; a.locations = [];
+    if (cur === v) return;
+    if (v === 'all') a.regions = [...REGION_IDS]; else a.locations = [SIDE_LOC[v]];
+  }),
+  't-q': el => editToday(t => toggleIn(t.a.qualities, el.dataset.v)),
+  't-sym': el => editToday(t => toggleIn(t.a.symptoms, el.dataset.v)),
+  't-impact': el => editToday(({ a }) => { const v = +el.dataset.v; a.impact = a.impact === v ? null : v; }),
+  't-med': el => editToday(t => {
+    const n = el.dataset.v;
+    if (!t.a.meds.some(m => m.name === n)) {
+      t.a.meds.push({ id: uid(), name: n, dose: el.dataset.dose || '', time: hhmm(new Date()), effect: null, relief: null });
+      t.island = n;
+    } else t.island = t.island === n ? null : n;
+  }),
+  't-med-del': el => editToday(t => {
+    t.a.meds = t.a.meds.filter(m => m.name !== el.dataset.v);
+    if (t.island === el.dataset.v) t.island = null;
+  }),
+  't-eff': el => editToday(t => {
+    const m = t.a.meds.find(x => x.name === el.dataset.m), v = +el.dataset.v;
+    if (!m) return;
+    m.effect = m.effect === v ? null : v;
+    if (!(m.effect > 0)) m.relief = null;
+  }),
+  't-sleep': el => editToday(t => { const v = +el.dataset.v; t.sleep = t.sleep === v ? null : v; }),
+  't-drink': el => editToday(t => {
+    const v = el.dataset.v;
+    if (v === 'none') { t.drinks = t.drinks.includes('none') ? [] : ['none']; return; }
+    t.drinks = t.drinks.filter(x => x !== 'none');
+    toggleIn(t.drinks, v);
+  }),
+  't-period': el => editToday(t => { t.period = el.dataset.v === '1'; }),
+  't-weather': el => editToday(t => { t.weather = el.dataset.v === '1'; }),
+  't-detail': () => {
+    const t = todayState();
+    openSheet({ type: 'attack', draft: { ...structuredClone(t.a), vas: t.vas || null, note: t.a.note || '' }, dirty: true });
   },
+  't-save': () => saveToday(),
   tile: el => openSheet({ type: 'checkin', k: el.dataset.k, date: todayKey() }),
   'new-attack': el => openAttack(null, el.dataset.k || null),
   'edit-attack': el => openAttack(state.attacks.find(a => a.id === el.dataset.id)),
@@ -1724,11 +1601,13 @@ const ACTIONS = {
     const a = {
       id: d.id || uid(), start: start.toISOString(), vas: d.vas, severity: sevOfVas(d.vas),
       regions: d.regions, qualities: d.qualities, symptoms: d.symptoms, duration: d.duration, triggers: d.triggers,
-      meds: d.meds.map(({ id, name, dose, time, effect, relief }) => ({ id, name, dose, time, effect, relief })),
-      note: (d.note || '').trim(), createdAt: d.createdAt || Date.now(), updatedAt: Date.now(),
+      meds: d.meds.map(({ id, name, dose, time, effect, relief }) => ({ id: id || uid(), name, dose, time, effect, relief })),
+      impact: d.impact ?? null, note: (d.note || '').trim(), createdAt: d.createdAt || Date.now(), updatedAt: Date.now(),
     };
     if (!d.regions.length && d.locations?.length) a.locations = d.locations;
     upsertAttack(a);
+    // 首页有没保存的草稿时，把这次头痛同步过去；没有草稿的话首页会按保存的数据重新显示
+    if (ui.today?.dirty && ui.today.date === S.attackDay(a)) { ui.today.vas = vasOf(a); ui.today.a = attackToToday(a); keepDraft(); }
     closeSheet(true);
     toast(d.id ? '已更新' : '已记录，好好休息');
   },
@@ -1838,7 +1717,6 @@ const ACTIONS = {
     await db.clearAll();
     state.attacks = []; state.days = {};
     state.settings = { name: '', meds: DEFAULT_MEDS.map(m => ({ ...m })), customTriggers: [], hideInstall: state.settings.hideInstall };
-    state.ai = AI_DEFAULT();
     saveSettings(); afterWrite(); render();
     toast('已清除');
   },
@@ -1853,16 +1731,30 @@ function addLog(kind, cat, item) {
 }
 
 const INPUTS = {
-  'qe-text': el => {
-    ui.qeText = el.value;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight + 2, 280)}px`;
-    clearTimeout(INPUTS.qt);
-    INPUTS.qt = setTimeout(() => { try { localStorage.setItem('qe-draft', ui.qeText); } catch { /* ignore */ } }, 400);
+  't-vas': el => {
+    const t = todayState(), v = +el.value;
+    t.vas = v; t.a.vas = v || null;
+    $app.querySelector('#t-vas').innerHTML = vasLabel(v);
+    keepDraft(); syncToday();
   },
-  'ai-url': el => aiField('url', el.value),
-  'ai-key': el => aiField('key', el.value),
-  'ai-model': el => aiField('model', el.value),
+  't-time': el => {
+    if (!el.value) return;
+    const a = todayState().a;
+    a.start = `${a.start.split('T')[0]}T${el.value}`;
+    el.previousElementSibling.textContent = el.value;
+    keepDraft(); syncToday();
+  },
+  't-dur': el => {
+    const a = todayState().a, d = durationOf(el.value);
+    a.duration = el.value || null;
+    $app.querySelector('.t-dur').textContent = d ? `持续 ${d.label}` : '持续多久';
+    keepDraft(); syncToday();
+  },
+  't-med-time': el => {
+    const m = todayState().a.meds.find(x => x.name === el.dataset.m);
+    if (m) m.time = el.value;
+    keepDraft(); syncToday();
+  },
   'log-note': el => {
     const f = LOGS[el.dataset.kind].field, id = el.dataset.id, v = el.value;
     clearTimeout(INPUTS.ln);
@@ -1891,7 +1783,7 @@ const INPUTS = {
 
 document.addEventListener('click', e => {
   // 桌面浏览器点透明的日期 / 时间框不会自动弹出选择器，手动打开（iOS 点一下本来就会弹出）
-  const picker = e.target.closest('.dt-pill input');
+  const picker = e.target.closest('.dt-pill input, .t-pill input, .t-pill select, .mc-time input');
   if (picker && !isIOS) { try { picker.showPicker(); } catch { /* 不支持 */ } }
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;

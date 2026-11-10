@@ -37,7 +37,7 @@ export function indexAttacks(attacks) {
 
 export function hasDayData(d) {
   if (!d) return false;
-  return d.pain === 0 || d.period != null || d.meals != null || d.caffeine != null || d.alcohol != null ||
+  return d.pain === 0 || d.period != null || d.weather != null || d.meals != null || d.caffeine != null || d.alcohol != null ||
     d.sleep != null || d.stress != null || d.mood != null || d.exercise != null || d.exIntensity != null ||
     (d.meds && d.meds.length > 0) || (d.foods && d.foods.length > 0) || (d.workouts && d.workouts.length > 0);
 }
@@ -213,6 +213,8 @@ export const FEATURES = [
     get: (d, prev) => (alcoholOf(d) == null && alcoholOf(prev) == null) ? null : +(!!alcoholOf(d) || !!alcoholOf(prev)) },
   { key: 'period', label: '经期前后', desc: '经期开始前 2 天到开始后 3 天',
     get: (d, prev, ctx) => ctx.known ? +ctx.inWindow : null },
+  { key: 'weather', label: '天气变化', desc: '当天或前一天变天（降温、下雨、气压变化等）',
+    get: (d, prev) => (d?.weather == null && prev?.weather == null) ? null : +(!!d?.weather || !!prev?.weather) },
   { key: 'exercise', label: '运动', desc: '当天运动 20 分钟以上',
     get: d => d?.exercise == null ? null : +(d.exercise >= 20) },
   { key: 'hardExercise', label: '剧烈运动', desc: '当天运动强度为「剧烈」',
