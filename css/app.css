@@ -743,113 +743,154 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .callout.danger-soft .ic { color: var(--period); }
 .callout a { color: var(--accent-text); font-weight: 600; text-decoration: none; }
 
-/* ---------- 今天：一屏记完 ---------- */
-/* 首页只有记录面板，一屏放下：底部留白收小一点 */
+/* ---------- 今天：一屏记完（像一张便签） ---------- */
 .view.v-home { padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 18px); display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
-.v-home > * { flex: none; }
-/* 问候语后面是图标那幅「水面上的日出」的放大版：只露出问候语到面板之间这一条，
-   地平线落在面板上边框上方一点，水面收进面板后面；面板从这里一直撑到底部 */
-.v-home > * { position: relative; z-index: 1; }
+.v-home > * { flex: none; position: relative; z-index: 1; }
+/* 问候语后面是图标那幅「水面上的日出」的放大版：太阳贴着地平线，地平线落在面板上边框上方一点，水面收进面板后面。
+   顶边渐变到状态栏的颜色（和 theme-color 一致），所以和状态栏之间没有分界 */
 .v-home > .home-sky {
   --s: min(140vw, 672px); z-index: 0;
-  margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 58px;
+  margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 84px;
   transition: padding-bottom .45s var(--island);
 }
 .home-sky::before {
-  content: ""; position: absolute; z-index: -1; inset: 0 0 -28px; pointer-events: none; opacity: .72;
-  background: url(../img/home-sky.jpg) no-repeat; background-size: var(--s) var(--s);
-  /* 画里地平线在 62% 的高度：让它停在面板上边框上方 12px */
-  background-position: left 68% bottom calc(40px - var(--s) * .38);
+  content: ""; position: absolute; z-index: -1; top: 0; left: 0; right: 0; bottom: -28px; pointer-events: none;
+  background: linear-gradient(#D3CDF3, rgba(211, 205, 243, 0) 48px) no-repeat, url(../img/home-sky.jpg) no-repeat;
+  background-size: 100% 100%, var(--s) var(--s);
+  /* 画里地平线在 62% 的高度：让它停在面板上边框上方 14px */
+  background-position: 0 0, left 75% bottom calc(42px - var(--s) * .38);
   -webkit-mask-image: linear-gradient(#000 calc(100% - 30px), transparent); mask-image: linear-gradient(#000 calc(100% - 30px), transparent);
 }
-/* 深色模式：同一幅画压暗成傍晚的样子 */
-@media (prefers-color-scheme: dark) { .home-sky::before { opacity: .62; filter: brightness(.5) saturate(1.3); } }
+/* 深色模式：同一幅画压成暮色（状态栏颜色 #6A667D 是按这个滤镜算出来的） */
+@media (prefers-color-scheme: dark) { .home-sky::before { filter: brightness(.5) saturate(1.2); } }
 /* 头痛的几项展开时，画让出一些高度 */
-.v-home:has(.today.has-pain) > .home-sky { padding-bottom: 26px; }
-@media (min-height: 880px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 44px; } }
-@media (max-height: 830px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 16px; } }
+.v-home:has(.today.has-pain) > .home-sky { padding-bottom: 30px; }
+@media (min-height: 880px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 48px; } }
+@media (max-height: 830px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 20px; } }
 .v-home .top { margin: 2px 2px 0; }
-/* 面板占满余下的高度：各行均分，选项横向铺满 */
-.v-home > .today { flex: 1 0 auto; display: flex; flex-direction: column; margin-bottom: 0; }
-.today > .trow, .pain-rows .trow { flex: 1 1 auto; }
-.today > .t-save { flex: none; }
 .v-home .top h1 { font-size: 25px; }
-.v-home .eyebrow { font-size: 13px; }
-.today { padding: 4px 12px 12px; }
-.trow { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 42px; max-height: 76px; padding: 4px 0; transition: min-height .45s var(--island); }
+.v-home .eyebrow { font-size: 13px; color: var(--ink); opacity: .7; }
+
+/* 面板占满余下的高度：各行均分，选项横向铺满 */
+.v-home > .today { flex: 1 0 auto; display: flex; flex-direction: column; margin-bottom: 0; padding: 6px 12px 12px; }
+.trow { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; flex: 1 1 auto; min-height: 44px; max-height: 76px; padding: 4px 0; transition: min-height .45s var(--island); }
 .trow.r-meds { max-height: none; }
-.trow + .trow, .pain-rows .trow:first-child { border-top: 1px solid var(--sep); }
 .trow-l { font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
-.trow-l.in { margin: 0 2px 0 10px; }
-.trow-c { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.trow-c { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+/* 没选中的选项只有一圈细线，选中的才有底色：一眼看过去不那么密 */
 .today .chip.mini {
-  min-height: 30px; padding: 0 9px; font-size: 13.5px; flex: 1 1 auto; border-radius: 15px;
+  min-height: 32px; padding: 0 9px; font-size: 13.5px; flex: 1 1 auto; border-radius: 16px;
+  background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--fill-2);
   transition: background-color .22s var(--ease), color .22s var(--ease), box-shadow .22s var(--ease), transform .18s var(--ease),
-    min-height .45s var(--island), padding .45s var(--island), font-size .45s var(--island), border-radius .45s var(--island);
+    min-height .45s var(--island), font-size .45s var(--island), border-radius .45s var(--island);
 }
-/* 空间够的时候宽敞一些：没有头痛时只有几行，疼痛滑块和数字放大、各行均匀撑开占满面板；屏幕高的手机，展开后也稍微宽松 */
-.today:not(.has-pain) > .trow { min-height: 60px; max-height: 108px; }
-.today:not(.has-pain) > .r-vas { min-height: 88px; max-height: 132px; flex-grow: 1.3; }
+.today .chip.mini.on { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* 没有头痛时只有几行：滑块、数字和按钮都放大，各行撑开占满面板 */
+.today:not(.has-pain) > .trow { min-height: 64px; max-height: 150px; }
+.today:not(.has-pain) > .r-vas:not(.r-sleep) { min-height: 100px; flex-grow: 1.3; }
 .today:not(.has-pain) .vas-ends { max-height: 18px; opacity: 1; }
-.today:not(.has-pain) .t-vas { width: 92px; }
+.today:not(.has-pain) .t-vas { width: 98px; }
 .today:not(.has-pain) .t-vas b { font-size: 34px; }
-.today:not(.has-pain) .chip.mini { min-height: 44px; padding: 0 8px; font-size: 15.5px; border-radius: 22px; flex: 1 1 0; }
-.today:not(.has-pain) .trow-c { gap: 7px; }
+.today:not(.has-pain) > .trow > .trow-c > .chip.mini { min-height: 46px; padding: 0 6px; font-size: 15.5px; border-radius: 23px; flex: 1 1 0; }
+.today:not(.has-pain) > .trow > .trow-c { gap: 7px; }
 .today:not(.has-pain) .trow-l { font-size: 14px; }
-.today:not(.has-pain) .t-save { min-height: 52px; margin-top: 12px; }
+.today:not(.has-pain) .tgl-row { max-height: 110px; }
+.today:not(.has-pain) .tgl { padding: 8px 14px; gap: 12px; }
+.today:not(.has-pain) .tgl .gl { width: 38px; height: 38px; }
+.today:not(.has-pain) .tgl-t b { font-size: 15px; }
+.today:not(.has-pain) .tgl-t i { font-size: 13px; }
 @media (min-height: 880px) {
-  .today.has-pain .trow { min-height: 46px; }
-  .today.has-pain .chip.mini, .today.has-pain .t-pill { min-height: 34px; font-size: 14px; }
+  .today.has-pain .trow { min-height: 48px; }
+  .today.has-pain .chip.mini { min-height: 34px; font-size: 14px; }
 }
-/* 屏幕矮的手机（如 mini）：展开后行距收紧一点，保证一屏放下 */
 @media (max-height: 830px) {
-  .today.has-pain .trow { min-height: 39px; padding: 3px 0; }
+  .today.has-pain .trow { min-height: 41px; padding: 3px 0; }
   .today.has-pain { padding-top: 2px; padding-bottom: 10px; }
 }
 .r-vas .trow-c { gap: 10px; flex-wrap: nowrap; }
 .vas-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.vas-wrap .range { width: 100%; margin: 0; height: 34px; }
+.vas-wrap .range, .r-sleep .range { width: 100%; margin: 0; height: 34px; }
+.r-sleep .range { flex: 1; min-width: 0; }
 .vas-ends { display: flex; justify-content: space-between; max-height: 0; opacity: 0; overflow: hidden; font-size: 11.5px; color: var(--ink-3); transition: max-height .45s var(--island), opacity .3s var(--ease); }
-.today.has-pain .range::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, .2); }
+.today.has-pain .vas-wrap .range::-webkit-slider-thumb, .sleep-range:not(.unset)::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, .2); }
 .t-vas { flex: none; width: 76px; display: flex; align-items: baseline; gap: 4px; font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; transition: width .45s var(--island); }
 .t-vas b { font-family: var(--num); font-size: 24px; line-height: 1; min-width: 15px; color: var(--accent-text); font-variant-numeric: tabular-nums; transition: color .3s var(--ease), font-size .45s var(--island); }
-.today:not(.has-pain) .t-vas b { color: var(--ink-3); }
+.today:not(.has-pain) #t-vas b, .sleep-range.unset + .t-sleep b { color: var(--ink-3); }
 /* 疼痛大于 0 时，其余几项平滑展开 */
 .pain-rows { display: grid; grid-template-rows: 0fr; opacity: 0; flex: 0 0 auto; transition: grid-template-rows .45s var(--island), opacity .3s var(--ease), flex-grow .45s var(--island); }
 .pain-rows > div { overflow: hidden; min-height: 0; display: flex; flex-direction: column; }
 .today.has-pain .pain-rows { grid-template-rows: 1fr; opacity: 1; flex-grow: 6; }
-.t-pill { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 1 1 auto; min-height: 30px; padding: 0 11px; border-radius: 15px; background: var(--fill); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
-.t-pill .ic { color: var(--accent-text); }
-.t-pill input, .t-pill select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; margin: 0; padding: 0; -webkit-appearance: none; appearance: none; font-size: 16px; cursor: pointer; }
 .t-note { font-size: 13.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .t-more { display: inline-flex; align-items: center; gap: 1px; flex: none; margin-left: 2px; padding: 4px 0 4px 6px; font-size: 12.5px; font-weight: 600; color: var(--accent-text); }
-.t-div { display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 11.5px; line-height: 16px; font-weight: 600; color: var(--ink-3); }
+.t-div { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; font-size: 11.5px; line-height: 16px; font-weight: 600; color: var(--ink-3); }
 .t-div::after { content: ""; flex: 1; height: 1px; background: var(--sep); }
-.t-div + .trow { border-top: 0; }
-.t-save { min-height: 44px; margin-top: 8px; border-radius: 14px; transition: background-color .35s var(--ease), color .35s var(--ease), min-height .45s var(--island), margin .45s var(--island); }
-.t-save.done { background: var(--accent-soft); color: var(--accent-text); }
-
-/* 用药：点一下，这颗胶囊像灵动岛一样展开（时间 + 效果），其他药被挤窄 */
-.meds-row { display: flex; align-items: flex-start; gap: 5px; width: 100%; min-width: 0; }
-.mchip {
-  flex: 1 1 auto; min-width: 0; max-width: 160px; border-radius: 15px; background: var(--fill); overflow: hidden;
-  transition: max-width .5s var(--island), flex-grow .5s var(--island), border-radius .5s var(--island), background-color .25s var(--ease), box-shadow .25s var(--ease);
+/* 最后一行：月经、天气两块开关，右下角是圆形的 ✓ 保存键 */
+.tgl-row { display: flex; align-items: stretch; gap: 8px; flex: 1 1 auto; min-height: 54px; max-height: 64px; margin-top: 6px; }
+.tgl {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 18px; text-align: left;
+  box-shadow: inset 0 0 0 1px var(--fill-2); transition: background-color .25s var(--ease), box-shadow .25s var(--ease), transform .18s var(--ease), padding .45s var(--island);
 }
-.mchip.sel { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tgl:active { transform: scale(.97); }
+.tgl .gl { width: 30px; height: 30px; transition: width .45s var(--island), height .45s var(--island); }
+.tgl-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.tgl-t b { font-size: 13.5px; font-weight: 600; }
+.tgl-t i { font-style: normal; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .25s var(--ease); }
+.tgl.on { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tgl.on .tgl-t i { color: var(--accent-text); font-weight: 600; }
+.t-save {
+  flex: none; align-self: center; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: #fff; box-shadow: 0 8px 18px -8px var(--accent);
+  transition: background-color .35s var(--ease), color .35s var(--ease), box-shadow .35s var(--ease), transform .18s var(--ease);
+}
+.t-save:active { transform: scale(.93); }
+.t-save.done { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* 时间、用药：点一下，这颗胶囊像灵动岛一样展开，旁边的被挤窄 */
+.meds-row { display: flex; align-items: flex-start; gap: 6px; width: 100%; min-width: 0; }
+.mchip {
+  flex: 1 1 auto; min-width: 0; max-width: 160px; border-radius: 16px; overflow: hidden; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--fill-2);
+  transition: max-width .5s var(--island), flex-grow .5s var(--island), border-radius .5s var(--island), background-color .25s var(--ease), box-shadow .25s var(--ease), color .25s var(--ease);
+}
+.tm-row .mchip { flex: 1 1 0; max-width: 240px; color: var(--ink); transition-property: max-width, flex-grow, border-radius, background-color, box-shadow, color, opacity, margin; }
+.mchip.sel, .tchip.open { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .meds-row.has-open .mchip:not(.open) { max-width: 40px; flex-grow: 0; }
-.mchip.open { flex-grow: 1; max-width: 320px; border-radius: 18px; }
+/* 时间这一行（以及选服药时间时）：展开的那颗占满整行，其他的先让开 */
+.md-row .mchip { transition-property: max-width, flex-grow, border-radius, background-color, box-shadow, color, opacity, margin; }
+.tm-row.has-open .mchip:not(.open), .md-row.solo .mchip:not(.open) { max-width: 0; opacity: 0; margin-left: -6px; }
+.tm-row.has-open .mchip:first-child:not(.open), .md-row.solo .mchip:first-child:not(.open) { margin-left: 0; margin-right: -6px; }
+.mchip.open { flex-grow: 1; max-width: 380px; border-radius: 20px; }
 .mc-top { display: flex; align-items: center; }
-.mc-name { flex: 1; min-width: 0; min-height: 30px; padding: 0 9px; font-size: 13.5px; text-align: center; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-name { flex: 1; min-width: 0; min-height: 32px; padding: 0 9px; font-size: 13.5px; text-align: center; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mchip.sel .mc-name { font-weight: 600; }
 .mchip.open .mc-name { text-align: left; }
-.mc-x { display: grid; place-items: center; flex: none; width: 0; height: 30px; opacity: 0; color: inherit; overflow: hidden; transition: width .45s var(--island), opacity .25s var(--ease); }
-.mchip.open .mc-x { width: 28px; opacity: .7; }
-.mc-more { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .5s var(--island), opacity .25s var(--ease); }
-.mc-more > div { overflow: hidden; min-height: 0; }
-.mchip.open .mc-more { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .08s; }
+.tchip .mc-name { display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tchip.open .mc-name { justify-content: flex-start; }
+.tchip .mc-name .ic { color: var(--accent-text); flex: none; }
+.tchip .mc-name span { overflow: hidden; text-overflow: ellipsis; }
+.mc-x { display: grid; place-items: center; flex: none; width: 0; height: 32px; opacity: 0; color: inherit; overflow: hidden; transition: width .45s var(--island), opacity .25s var(--ease); }
+.mchip.open .mc-x { width: 30px; opacity: .75; }
+.mc-more, .mc-tp { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .5s var(--island), opacity .25s var(--ease); }
+.mc-more > div, .mc-tp > div { overflow: hidden; min-height: 0; }
+.mchip.open .mc-more, .mc-tp.open { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .08s; }
 .mc-inner { display: flex; align-items: center; gap: 6px; padding: 0 6px 6px; }
-.mc-time { position: relative; display: inline-flex; align-items: center; gap: 4px; flex: none; height: 28px; padding: 0 9px; border-radius: 14px; background: var(--card); color: var(--ink); font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.mc-time input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; margin: 0; padding: 0; -webkit-appearance: none; appearance: none; font-size: 16px; }
+.mc-time { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 28px; padding: 0 9px; border-radius: 14px; background: var(--card); color: var(--ink); font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .mc-eff { display: flex; flex: 1; min-width: 0; padding: 2px; border-radius: 14px; background: var(--card); }
 .mc-eff button { flex: 1; height: 24px; border-radius: 12px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; transition: background-color .25s var(--ease), color .25s var(--ease); }
 .mc-eff button.on { background: var(--accent); color: #fff; font-weight: 600; }
+/* 胶囊里的内容：快捷项、预设，和我们自己的时间条（小时左右滑 + 四个分钟） */
+.tp { display: flex; flex-direction: column; gap: 6px; padding: 0 6px 6px; }
+.tp .chips { gap: 5px; }
+.today .tp .chip.mini { min-height: 28px; padding: 0 8px; font-size: 12.5px; border-radius: 14px; background: var(--card); color: var(--ink-2); box-shadow: none; flex: 1 1 auto; }
+.today .tp .chip.mini.on { background: var(--accent); color: #fff; }
+.tp-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mc-tp .tp-line { padding: 0 6px 6px; }
+.tp-hours {
+  position: relative; flex: 1; min-width: 0; display: flex; gap: 2px; padding: 2px; border-radius: 14px; background: var(--card);
+  overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+}
+.tp-hours::-webkit-scrollbar { display: none; }
+.tp-hours button { flex: none; width: 30px; height: 24px; border-radius: 12px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; scroll-snap-align: center; transition: background-color .25s var(--ease), color .25s var(--ease); }
+.tp-hours button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.tp-hours button:disabled { opacity: .28; }
+.tp-min { flex: none; }
+.tp-min button { flex: none; padding: 0 5px; font-variant-numeric: tabular-nums; }

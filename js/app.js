@@ -148,6 +148,10 @@ function render() {
   if (anim) countUp($app);
   else popLast($app);
   if (ui.tab === 'me') updatePersistInfo();
+  if (ui.tab === 'home') centerStrips(false);
+  // 首页的状态栏颜色和顶部那幅画接上，其他页面用页面底色
+  const tc = ui.tab === 'home' ? ['#D3CDF3', '#6A667D'] : ['#F5F2EC', '#0F1016'];
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m, i) => { m.content = tc[i] || tc[0]; });
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
@@ -246,7 +250,20 @@ const EFFECT_SHORT = ['无效', '部分', '完全'];
 const DRINKS = [['咖啡', '饮品', '咖啡'], ['茶', '饮品', '浓茶'], ['奶茶', '饮品', '奶茶'], ['酒', '酒类', '酒']];
 const drinkMatch = (f, [label, , item]) => label === '酒' ? f.cat === '酒类' : f.item === item;
 const drinkOn = (d, x) => (d.foods || []).some(f => drinkMatch(f, x)) || (x[0] === '酒' && d.alcohol === true);
-const SLEEP_OPTS = [[5, '≤5h'], [6, '6h'], [7, '7h'], [8, '8h'], [9, '≥9h']];
+// 持续多久：几个好点的预设（存的还是原来的时长档位，旧记录照常显示）
+const DUR_PRESETS = [['lt2', '不到 2 小时'], ['2-4', '2–4 小时'], ['4-12', '半天'], ['12-24', '一整天'], ['gt24', '超过一天'], ['ongoing', '还在疼']];
+const durText = k => DUR_PRESETS.find(x => x[0] === k)?.[1] || '';
+const AGO = [[0, '刚刚'], [30, '半小时前'], [60, '1 小时前'], [120, '2 小时前']];
+const pad2 = n => String(n).padStart(2, '0');
+// 时间选择（开始时间和每种药的服药时间共用）：who 是 '@start' 或药名
+const timeOf = (t, who) => who === '@start' ? (t.a.start.split('T')[1] || '') : (t.a.meds.find(m => m.name === who)?.time || '');
+function setTimeOf(t, who, time) {
+  // 今天还没到的时间不能选：超过现在就按现在算
+  const now = hhmm(new Date());
+  if (time > now) time = now;
+  if (who === '@start') t.a.start = `${t.a.start.split('T')[0]}T${time}`;
+  else { const m = t.a.meds.find(x => x.name === who); if (m) m.time = time; }
+}
 const TODAY_KEY = 'today-draft';
 
 const attackToToday = a => ({
@@ -294,68 +311,90 @@ function editToday(fn) {
   syncToday();
 }
 
-function todayOn(t, act, v) {
-  const a = t.a;
+function todayOn(t, el) {
+  const a = t.a, { act, v } = el.dataset;
   switch (act) {
     case 't-side': return sideOf(a) === v;
     case 't-q': return a.qualities.includes(v);
     case 't-sym': return a.symptoms.includes(v);
     case 't-impact': return a.impact === +v;
-    case 't-sleep': return t.sleep === +v;
+    case 't-dur': return a.duration === v;
     case 't-drink': return t.drinks.includes(v);
-    case 't-period': return v === '1' ? t.period : !t.period;
-    case 't-weather': return v === '1' ? t.weather : !t.weather;
+    case 't-period': return t.period;
+    case 't-weather': return t.weather;
+    case 't-hour': { const tm = timeOf(t, el.dataset.for); return tm !== '' && +tm.split(':')[0] === +v; }
+    case 't-min': { const tm = timeOf(t, el.dataset.for); return tm !== '' && +tm.split(':')[1] === +v; }
     default: return null;
   }
 }
 const vasLabel = v => v > 0 ? `<b>${v}</b>${vasWord(v)}` : '<b>0</b>没有头痛';
-const saveLabel = t => !t.dirty && t.saved ? `${icon('check', 17, 2.4)}今天已记好` : '保存';
+const sleepLabel = v => `<b>${v ?? '–'}</b>小时`;
 function periodDay(t) {
   if (!t.period) return 0;
   if (state.days[t.date]?.period) return S.periodDayNumber(state.days, t.date);
   const y = shiftKey(t.date, -1);
   return state.days[y]?.period ? S.periodDayNumber(state.days, y) + 1 : 1;
 }
+const periodText = t => t.period ? `经期第 ${periodDay(t)} 天` : '不在经期';
+const weatherText = t => t.weather ? '变天了' : '没变化';
+// 我们自己的时间选择：一条可以左右滑的小时，加四个分钟
+const timeStrip = (who, time) => {
+  const w = esc(who), [h, m] = time ? time.split(':').map(Number) : [-1, -1], nowH = new Date().getHours();
+  return `<div class="tp-line"><div class="tp-hours" role="group" aria-label="几点">${Array.from({ length: 24 }, (_, i) => `<button class="${i === h ? 'on' : ''}" data-act="t-hour" data-for="${w}" data-v="${i}" ${i > nowH ? 'disabled' : ''}>${i}</button>`).join('')}</div>
+    <div class="mc-eff tp-min" role="group" aria-label="几分">${[0, 15, 30, 45].map(v => `<button class="${v === m ? 'on' : ''}" data-act="t-min" data-for="${w}" data-v="${v}">:${pad2(v)}</button>`).join('')}</div></div>`;
+};
+// 把选中的小时滑到中间
+function centerStrips(smooth) {
+  $app.querySelectorAll('.tp-hours').forEach(el => {
+    const on = el.querySelector('.on');
+    if (on) el.scrollTo({ left: on.offsetLeft - (el.clientWidth - on.offsetWidth) / 2, behavior: smooth ? 'smooth' : 'auto' });
+  });
+}
 
 function todayCards() {
-  const t = todayState(), a = t.a, st = parseLocal(a.start), dur = durationOf(a.duration), side = sideOf(a);
+  const t = todayState(), a = t.a, side = sideOf(a);
   const chip = (act, v, label, aria = '') => {
-    const on = todayOn(t, act, String(v));
+    const on = todayOn(t, { dataset: { act, v: String(v) } });
     return `<button class="chip mini ${on ? 'on' : ''}" data-act="${act}" data-v="${esc(v)}" aria-pressed="${on}"${aria ? ` aria-label="${esc(aria)}"` : ''}>${label}</button>`;
   };
   const row = (label, body, cls = '') => `<div class="trow ${cls}"><span class="trow-l">${label}</span><div class="trow-c">${body}</div></div>`;
   const presets = state.settings.meds.filter(m => m.kind !== 'preventive');
-  const openMed = t.island && a.meds.some(m => m.name === t.island);
-  // 用药：点一下，这一颗胶囊像灵动岛一样展开，可以选时间和效果，旁边的药被挤窄
+  const openMed = ui.island && a.meds.some(m => m.name === ui.island);
+  // 时间和用药：点一下，这一颗像灵动岛一样展开，旁边的被挤窄；一次只展开一颗
+  const island = (k, cls, name, more, xLabel, xIcon) => `<div class="mchip ${cls} ${ui.island === k ? 'open' : ''}" data-k="${esc(k)}">
+      <div class="mc-top">${name}<button class="mc-x" data-act="${k[0] === '@' ? 't-island' : 't-med-del'}" data-v="${esc(k)}" aria-label="${xLabel}">${icon(xIcon, 13, 2.4)}</button></div>
+      <div class="mc-more"><div>${more}</div></div></div>`;
+  const startChip = island('@start', 'tchip', `<button class="mc-name" data-act="t-island" data-v="@start">${icon('clock', 14, 2)}<span class="t-start">${timeOf(t, '@start')}</span>开始</button>`,
+    `<div class="tp"><div class="chips">${AGO.map(([m, l]) => `<button class="chip mini" data-act="t-ago" data-v="${m}">${l}</button>`).join('')}</div>${timeStrip('@start', timeOf(t, '@start'))}</div>`, '收起', 'check');
+  const durChip = island('@dur', 'tchip', `<button class="mc-name" data-act="t-island" data-v="@dur"><span class="t-dur">${a.duration ? `持续 ${durText(a.duration)}` : '持续多久'}</span>${icon('chevD', 13, 2.2)}</button>`,
+    `<div class="tp"><div class="chips">${DUR_PRESETS.map(([k, l]) => chip('t-dur', k, l)).join('')}</div></div>`, '收起', 'check');
   const medChip = p => {
     const m = a.meds.find(x => x.name === p.name), n = esc(p.name);
-    return `<div class="mchip ${m ? 'sel' : ''} ${m && t.island === p.name ? 'open' : ''}" data-name="${n}">
-      <div class="mc-top"><button class="mc-name" data-act="t-med" data-v="${n}" data-dose="${esc(p.dose)}" aria-label="${n}">${n}</button>
-        <button class="mc-x" data-act="t-med-del" data-v="${n}" aria-label="不记${n}">${icon('x', 13, 2.4)}</button></div>
-      <div class="mc-more"><div><div class="mc-inner">
-        <label class="mc-time">${icon('clock', 13, 2)}<span>${esc(m?.time || '几点')}</span><input type="time" value="${esc(m?.time || '')}" data-input="t-med-time" data-m="${n}" aria-label="${n}的服药时间"></label>
-        <div class="mc-eff">${EFFECT_SHORT.map((l, v) => `<button class="${m?.effect === v ? 'on' : ''}" data-act="t-eff" data-m="${n}" data-v="${v}" aria-label="${EFFECTS[v].label}">${l}</button>`).join('')}</div>
-      </div></div></div>
-    </div>`;
+    return island(p.name, m ? 'sel' : '', `<button class="mc-name" data-act="t-med" data-v="${n}" data-dose="${esc(p.dose)}" aria-label="${n}">${n}</button>`,
+      `<div class="mc-inner"><button class="mc-time" data-act="t-medtime" data-v="${n}" aria-label="${n}的服药时间">${icon('clock', 13, 2)}<span>${esc(m?.time || '几点')}</span></button>
+        <div class="mc-eff">${EFFECT_SHORT.map((l, v) => `<button class="${m?.effect === v ? 'on' : ''}" data-act="t-eff" data-m="${n}" data-v="${v}" aria-label="${EFFECTS[v].label}">${l}</button>`).join('')}</div></div>
+      <div class="mc-tp ${ui.medTime && ui.island === p.name ? 'open' : ''}"><div>${timeStrip(p.name, m?.time || '')}</div></div>`, `不记${n}`, 'x');
   };
+  const done = !t.dirty && t.saved;
   return `<section class="card today ${t.vas > 0 ? 'has-pain' : ''}">
     ${row('疼痛', `<div class="vas-wrap"><input class="range" type="range" min="0" max="10" step="1" value="${t.vas}" data-input="t-vas" aria-label="疼痛程度，0 是没有头痛，10 是能想象的最痛">
       <div class="vas-ends" aria-hidden="true"><span>0 不痛</span><span>10 最痛</span></div></div><span class="t-vas" id="t-vas">${vasLabel(t.vas)}</span>`, 'r-vas')}
     <div class="pain-rows"><div>
-      ${row('时间', `<label class="t-pill">${icon('clock', 14, 2)}<span>${hhmm(st)}</span><input type="time" value="${hhmm(st)}" data-input="t-time" aria-label="开始时间"></label>
-        <label class="t-pill"><span class="t-dur">${dur ? `持续 ${dur.label}` : '持续多久'}</span>${icon('chevD', 13, 2.2)}<select data-input="t-dur" aria-label="持续多久"><option value="">还不确定</option>${DURATIONS.map(o => `<option value="${o.k}" ${a.duration === o.k ? 'selected' : ''}>${o.label}</option>`).join('')}</select></label>`)}
+      ${row('时间', `<div class="meds-row tm-row ${ui.island?.[0] === '@' ? 'has-open' : ''}">${startChip}${durChip}</div>`, 'r-meds')}
       ${row('侧别', side === null ? `<span class="t-note">${esc(regionSummary(a))}</span><button class="link-btn" data-act="t-detail">改</button>` : SIDES.map(([k, l]) => chip('t-side', k, l)).join(''))}
       ${row('性质', QUICK_Q.map(([k, l]) => chip('t-q', k, l, k)).join(''))}
       ${row('伴随', QUICK_SYM.map(([k, l]) => chip('t-sym', k, l, k)).join(''))}
-      ${row('用药', presets.length ? `<div class="meds-row ${openMed ? 'has-open' : ''}">${presets.map(medChip).join('')}</div>` : '<span class="t-note">在「我的」里添加常用药</span>', 'r-meds')}
+      ${row('用药', presets.length ? `<div class="meds-row md-row ${openMed ? 'has-open' : ''} ${openMed && ui.medTime ? 'solo' : ''}">${presets.map(medChip).join('')}</div>` : '<span class="t-note">在「我的」里添加常用药</span>', 'r-meds')}
       ${row('耽误', IMPACT_SHORT.map((l, i) => chip('t-impact', i, l, `耽误上班、带孩子：${IMPACT[i]}`)).join('') + `<button class="t-more" data-act="t-detail" aria-label="部位图、诱因、备注">详细${icon('chevR', 14)}</button>`)}
     </div></div>
     <div class="t-div"><span>诱因</span></div>
-    ${row('睡眠', SLEEP_OPTS.map(([v, l]) => chip('t-sleep', v, l)).join('') + (t.sleep != null && !SLEEP_OPTS.some(([v]) => v === t.sleep) ? chip('t-sleep', t.sleep, `${t.sleep}h`) : ''))}
+    ${row('睡眠', `<input class="range sleep-range ${t.sleep == null ? 'unset' : ''}" type="range" min="3" max="12" step="0.5" value="${t.sleep ?? 7}" data-input="t-sleep-r" aria-label="昨晚睡了几个小时"><span class="t-vas t-sleep" id="t-sleep">${sleepLabel(t.sleep)}</span>`, 'r-vas r-sleep')}
     ${row('喝了', DRINKS.map(([l]) => chip('t-drink', l, l)).join('') + chip('t-drink', 'none', '没喝'))}
-    ${row('月经', chip('t-period', '0', '不在经期') + chip('t-period', '1', t.period ? `经期第 ${periodDay(t)} 天` : '经期中'))}
-    ${row('天气', chip('t-weather', '0', '没变化') + chip('t-weather', '1', '变天了'))}
-    <button class="btn primary block t-save ${!t.dirty && t.saved ? 'done' : ''}" data-act="t-save">${saveLabel(t)}</button>
+    <div class="tgl-row">
+      <button class="tgl ${t.period ? 'on' : ''}" data-act="t-period" aria-pressed="${t.period}"><span class="gl" style="--c:var(--t-period)">${icon('drop', 17, 2)}</span><span class="tgl-t"><b>月经</b><i>${periodText(t)}</i></span></button>
+      <button class="tgl ${t.weather ? 'on' : ''}" data-act="t-weather" aria-pressed="${t.weather}"><span class="gl" style="--c:var(--t-meds)">${icon('cloud', 17, 1.9)}</span><span class="tgl-t"><b>天气</b><i>${weatherText(t)}</i></span></button>
+      <button class="t-save ${done ? 'done' : ''}" data-act="t-save" aria-label="${done ? '今天已记好' : '保存今天的记录'}">${icon('check', 24, 2.6)}</button>
+    </div>
   </section>`;
 }
 
@@ -364,26 +403,33 @@ function syncToday() {
   const t = ui.today, a = t.a, root = $app.querySelector('.today');
   if (!root) return;
   root.classList.toggle('has-pain', t.vas > 0);
-  root.querySelectorAll('.chip[data-act]').forEach(el => {
-    const on = todayOn(t, el.dataset.act, el.dataset.v);
+  root.querySelectorAll('[data-act]').forEach(el => {
+    const on = todayOn(t, el);
     if (on == null) return;
     el.classList.toggle('on', on);
-    el.setAttribute('aria-pressed', on);
+    if (el.hasAttribute('aria-pressed')) el.setAttribute('aria-pressed', on);
   });
-  const pc = root.querySelector('[data-act="t-period"][data-v="1"]');
-  if (pc) pc.textContent = t.period ? `经期第 ${periodDay(t)} 天` : '经期中';
-  const openMed = t.island && a.meds.some(m => m.name === t.island);
-  root.querySelector('.meds-row')?.classList.toggle('has-open', !!openMed);
+  const openMed = ui.island && a.meds.some(m => m.name === ui.island);
+  root.querySelector('.tm-row').classList.toggle('has-open', ui.island?.[0] === '@');
+  root.querySelector('.md-row')?.classList.toggle('has-open', !!openMed);
+  root.querySelector('.md-row')?.classList.toggle('solo', !!openMed && !!ui.medTime);
   root.querySelectorAll('.mchip').forEach(el => {
-    const m = a.meds.find(x => x.name === el.dataset.name);
+    const k = el.dataset.k, m = k[0] === '@' ? null : a.meds.find(x => x.name === k);
+    el.classList.toggle('open', ui.island === k && (k[0] === '@' || !!m));
+    if (k[0] === '@') return;
     el.classList.toggle('sel', !!m);
-    el.classList.toggle('open', !!m && t.island === el.dataset.name);
     el.querySelector('.mc-time span').textContent = m?.time || '几点';
-    el.querySelectorAll('.mc-eff button').forEach(b => b.classList.toggle('on', m?.effect === +b.dataset.v));
+    el.querySelectorAll('.mc-eff:not(.tp-min) button').forEach(b => b.classList.toggle('on', m?.effect === +b.dataset.v));
+    el.querySelector('.mc-tp').classList.toggle('open', !!m && ui.medTime && ui.island === k);
   });
-  const btn = root.querySelector('.t-save');
-  btn.classList.toggle('done', !t.dirty && t.saved);
-  btn.innerHTML = saveLabel(t);
+  root.querySelector('.t-start').textContent = timeOf(t, '@start');
+  root.querySelector('.t-dur').textContent = a.duration ? `持续 ${durText(a.duration)}` : '持续多久';
+  root.querySelector('.tgl[data-act="t-period"] i').textContent = periodText(t);
+  root.querySelector('.tgl[data-act="t-weather"] i').textContent = weatherText(t);
+  const btn = root.querySelector('.t-save'), done = !t.dirty && t.saved;
+  btn.classList.toggle('done', done);
+  btn.setAttribute('aria-label', done ? '今天已记好' : '保存今天的记录');
+  centerStrips(true);
 }
 
 function saveToday() {
@@ -926,7 +972,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.8</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.9</div></div></div>
   </div>`;
 }
 
@@ -1491,32 +1537,41 @@ const ACTIONS = {
   't-q': el => editToday(t => toggleIn(t.a.qualities, el.dataset.v)),
   't-sym': el => editToday(t => toggleIn(t.a.symptoms, el.dataset.v)),
   't-impact': el => editToday(({ a }) => { const v = +el.dataset.v; a.impact = a.impact === v ? null : v; }),
-  't-med': el => editToday(t => {
-    const n = el.dataset.v;
-    if (!t.a.meds.some(m => m.name === n)) {
-      t.a.meds.push({ id: uid(), name: n, dose: el.dataset.dose || '', time: hhmm(new Date()), effect: null, relief: null });
-      t.island = n;
-    } else t.island = t.island === n ? null : n;
+  // 展开 / 收起一颗胶囊（不算改动）
+  't-island': el => { ui.island = ui.island === el.dataset.v ? null : el.dataset.v; ui.medTime = false; syncToday(); },
+  't-ago': el => editToday(t => {
+    const d = new Date(Date.now() - +el.dataset.v * 60000);
+    setTimeOf(t, '@start', dkey(d) === t.date ? hhmm(d) : '00:00');
   }),
+  't-hour': el => editToday(t => { const who = el.dataset.for, m = timeOf(t, who).split(':')[1] || '00'; setTimeOf(t, who, `${pad2(+el.dataset.v)}:${m}`); }),
+  't-min': el => editToday(t => { const who = el.dataset.for, h = timeOf(t, who).split(':')[0] || pad2(new Date().getHours()); setTimeOf(t, who, `${h}:${pad2(+el.dataset.v)}`); }),
+  't-dur': el => editToday(({ a }) => { a.duration = a.duration === el.dataset.v ? null : el.dataset.v; if (a.duration) ui.island = null; }),
+  't-med': el => {
+    const t = todayState(), n = el.dataset.v;
+    ui.medTime = false;
+    if (t.a.meds.some(m => m.name === n)) { ui.island = ui.island === n ? null : n; return syncToday(); }
+    ui.island = n;
+    editToday(t => t.a.meds.push({ id: uid(), name: n, dose: el.dataset.dose || '', time: hhmm(new Date()), effect: null, relief: null }));
+  },
   't-med-del': el => editToday(t => {
     t.a.meds = t.a.meds.filter(m => m.name !== el.dataset.v);
-    if (t.island === el.dataset.v) t.island = null;
+    if (ui.island === el.dataset.v) ui.island = null;
   }),
+  't-medtime': () => { ui.medTime = !ui.medTime; syncToday(); },
   't-eff': el => editToday(t => {
     const m = t.a.meds.find(x => x.name === el.dataset.m), v = +el.dataset.v;
     if (!m) return;
     m.effect = m.effect === v ? null : v;
     if (!(m.effect > 0)) m.relief = null;
   }),
-  't-sleep': el => editToday(t => { const v = +el.dataset.v; t.sleep = t.sleep === v ? null : v; }),
   't-drink': el => editToday(t => {
     const v = el.dataset.v;
     if (v === 'none') { t.drinks = t.drinks.includes('none') ? [] : ['none']; return; }
     t.drinks = t.drinks.filter(x => x !== 'none');
     toggleIn(t.drinks, v);
   }),
-  't-period': el => editToday(t => { t.period = el.dataset.v === '1'; }),
-  't-weather': el => editToday(t => { t.weather = el.dataset.v === '1'; }),
+  't-period': () => editToday(t => { t.period = !t.period; }),
+  't-weather': () => editToday(t => { t.weather = !t.weather; }),
   't-detail': () => {
     const t = todayState();
     openSheet({ type: 'attack', draft: { ...structuredClone(t.a), vas: t.vas || null, note: t.a.note || '' }, dirty: true });
@@ -1737,22 +1792,11 @@ const INPUTS = {
     $app.querySelector('#t-vas').innerHTML = vasLabel(v);
     keepDraft(); syncToday();
   },
-  't-time': el => {
-    if (!el.value) return;
-    const a = todayState().a;
-    a.start = `${a.start.split('T')[0]}T${el.value}`;
-    el.previousElementSibling.textContent = el.value;
-    keepDraft(); syncToday();
-  },
-  't-dur': el => {
-    const a = todayState().a, d = durationOf(el.value);
-    a.duration = el.value || null;
-    $app.querySelector('.t-dur').textContent = d ? `持续 ${d.label}` : '持续多久';
-    keepDraft(); syncToday();
-  },
-  't-med-time': el => {
-    const m = todayState().a.meds.find(x => x.name === el.dataset.m);
-    if (m) m.time = el.value;
+  't-sleep-r': el => {
+    const t = todayState();
+    t.sleep = +el.value;
+    el.classList.remove('unset');
+    $app.querySelector('#t-sleep').innerHTML = sleepLabel(t.sleep);
     keepDraft(); syncToday();
   },
   'log-note': el => {
@@ -1783,7 +1827,7 @@ const INPUTS = {
 
 document.addEventListener('click', e => {
   // 桌面浏览器点透明的日期 / 时间框不会自动弹出选择器，手动打开（iOS 点一下本来就会弹出）
-  const picker = e.target.closest('.dt-pill input, .t-pill input, .t-pill select, .mc-time input');
+  const picker = e.target.closest('.dt-pill input');
   if (picker && !isIOS) { try { picker.showPicker(); } catch { /* 不支持 */ } }
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
