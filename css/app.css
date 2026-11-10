@@ -82,6 +82,8 @@
   --card-border: transparent;
   --radius: 20px;
   --tabbar-h: 64px;
+  --zenith: #7E7BCB;
+  --zenith-half: rgba(126, 123, 203, .5);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
@@ -91,6 +93,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --zenith: #34325A;
+    --zenith-half: rgba(52, 50, 90, .5);
     --bg: #0F1016;
     --card: #1B1C24;
     --fill: #25262F;
@@ -746,23 +750,42 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 /* ---------- 今天：一屏记完（像一张便签） ---------- */
 .view.v-home { padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 18px); display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
 .v-home > * { flex: none; position: relative; z-index: 1; }
-/* 问候语后面是图标那幅「水面上的日出」的放大版：太阳贴着地平线，地平线落在面板上边框上方一点，水面收进面板后面。
-   顶边渐变到状态栏的颜色（和 theme-color 一致），所以和状态栏之间没有分界 */
+/* 问候语后面是一幅「水面上的日出」：贴着面板上沿放，太阳在地平线上，地平线落在面板上边框上方一点。
+   全屏（html.bleed：内容能铺到刘海 / 灵动岛后面）时，画一直铺到屏幕顶，最上面压一层天顶的蓝紫色，状态栏的字才看得清；
+   不是全屏时状态栏是系统自己的一条，画的上沿就淡出到页面底色，和它接上。
+   位置只用最基本的写法（底边对齐、宽度 100%），各家浏览器画出来都一样 */
 .v-home > .home-sky {
-  --s: min(140vw, 672px); z-index: 0;
-  margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 84px;
+  z-index: 0; margin: calc(-1 * (var(--safe-t) + 14px)) -16px 0; padding: calc(var(--safe-t) + 14px) 16px 84px;
   transition: padding-bottom .45s var(--island);
 }
-.home-sky::before {
-  content: ""; position: absolute; z-index: -1; top: 0; left: 0; right: 0; bottom: -28px; pointer-events: none;
-  background: linear-gradient(#D3CDF3, rgba(211, 205, 243, 0) 48px) no-repeat, url(../img/home-sky.jpg) no-repeat;
-  background-size: 100% 100%, var(--s) var(--s);
-  /* 画里地平线在 62% 的高度：让它停在面板上边框上方 14px */
-  background-position: 0 0, left 75% bottom calc(42px - var(--s) * .38);
+.sky-art {
+  position: absolute; z-index: -1; top: 0; left: 0; right: 0; bottom: -28px; pointer-events: none;
+  background: #C9C3F1 url(../img/home-sky.jpg) 50% 100% / 100% auto no-repeat;
+  -webkit-mask-image: linear-gradient(transparent, #000 72px, #000 calc(100% - 30px), transparent);
+  mask-image: linear-gradient(transparent, #000 72px, #000 calc(100% - 30px), transparent);
+}
+.bleed .sky-art {
   -webkit-mask-image: linear-gradient(#000 calc(100% - 30px), transparent); mask-image: linear-gradient(#000 calc(100% - 30px), transparent);
 }
-/* 深色模式：同一幅画压成暮色（状态栏颜色 #6A667D 是按这个滤镜算出来的） */
-@media (prefers-color-scheme: dark) { .home-sky::before { filter: brightness(.5) saturate(1.2); } }
+.bleed .sky-art::after {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: calc(var(--safe-t) + 38px);
+  background: linear-gradient(var(--zenith) calc(var(--safe-t) * .35), var(--zenith-half) calc(var(--safe-t) + 2px), transparent);
+}
+/* 深色模式：换成暮色的那一幅（太阳还亮着） */
+@media (prefers-color-scheme: dark) { .sky-art { background-color: #656284; background-image: url(../img/home-sky-dark.jpg); } }
+/* 其他页面全屏时：状态栏后面垫一条同一片天，下面的页面像一张圆角的纸从天底下露出来 */
+.cap {
+  display: none; position: fixed; z-index: 35; top: 0; left: 0; right: 0; height: calc(var(--safe-t) + 20px); pointer-events: none;
+  background: linear-gradient(var(--zenith) calc(var(--safe-t) * .35), var(--zenith-half)), #C9C3F1 url(../img/home-sky.jpg) 50% 0 / 100% auto no-repeat;
+  -webkit-mask-image: linear-gradient(#000, #000), radial-gradient(circle at 100% 100%, transparent 19.5px, #000 20px), radial-gradient(circle at 0 100%, transparent 19.5px, #000 20px);
+  mask-image: linear-gradient(#000, #000), radial-gradient(circle at 100% 100%, transparent 19.5px, #000 20px), radial-gradient(circle at 0 100%, transparent 19.5px, #000 20px);
+  -webkit-mask-size: 100% calc(100% - 20px), 20px 20px, 20px 20px; mask-size: 100% calc(100% - 20px), 20px 20px, 20px 20px;
+  -webkit-mask-position: 0 0, 0 100%, 100% 100%; mask-position: 0 0, 0 100%, 100% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+@media (prefers-color-scheme: dark) { .cap { background-image: linear-gradient(var(--zenith) calc(var(--safe-t) * .35), var(--zenith-half)), url(../img/home-sky-dark.jpg); background-color: #656284; } }
+.bleed .cap { display: block; }
+.bleed[data-tab="home"] .cap { display: none; }
 /* 头痛的几项展开时，画让出一些高度 */
 .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 30px; }
 @media (min-height: 880px) { .v-home:has(.today.has-pain) > .home-sky { padding-bottom: 48px; } }
@@ -774,7 +797,6 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 /* 面板占满余下的高度：各行均分，选项横向铺满 */
 .v-home > .today { flex: 1 0 auto; display: flex; flex-direction: column; margin-bottom: 0; padding: 6px 12px 12px; }
 .trow { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; flex: 1 1 auto; min-height: 44px; max-height: 76px; padding: 4px 0; transition: min-height .45s var(--island); }
-.trow.r-meds { max-height: none; }
 .trow-l { font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .trow-c { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 /* 没选中的选项只有一圈细线，选中的才有底色：一眼看过去不那么密 */
@@ -845,52 +867,53 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .t-save:active { transform: scale(.93); }
 .t-save.done { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent); }
 
-/* 时间、用药：点一下，这颗胶囊像灵动岛一样展开，旁边的被挤窄 */
-.meds-row { display: flex; align-items: flex-start; gap: 6px; width: 100%; min-width: 0; }
-.mchip {
-  flex: 1 1 auto; min-width: 0; max-width: 160px; border-radius: 16px; overflow: hidden; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--fill-2);
-  transition: max-width .5s var(--island), flex-grow .5s var(--island), border-radius .5s var(--island), background-color .25s var(--ease), box-shadow .25s var(--ease), color .25s var(--ease);
+/* 时间、用药的胶囊：点一下弹出滚轮面板 */
+.meds-row { display: flex; gap: 6px; width: 100%; min-width: 0; }
+.today .mchip { min-width: 0; gap: 5px; }
+.mc-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mc-t { flex: none; font-style: normal; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .78; }
+.mc-t:empty { display: none; }
+.today .tchip { flex: 1 1 0; min-width: 0; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.today .tchip.on { color: var(--accent-text); }
+.tchip .ic { color: var(--accent-text); flex: none; }
+.tchip .t-dur { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* 「灵动岛」：从点到的那一颗里弹出来，盖在选项上面；展开和收起只用 transform / opacity（脚本里做），不重新排版 */
+.isl {
+  position: fixed; z-index: 45; left: 0; top: 0; transform-origin: 0 0; border-radius: 28px; overflow: hidden; will-change: transform, opacity;
+  background: var(--card); box-shadow: 0 0 0 1.5px var(--accent), 0 22px 48px -14px rgba(40, 36, 90, .42);
 }
-.tm-row .mchip { flex: 1 1 0; max-width: 240px; color: var(--ink); transition-property: max-width, flex-grow, border-radius, background-color, box-shadow, color, opacity, margin; }
-.mchip.sel, .tchip.open { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.meds-row.has-open .mchip:not(.open) { max-width: 40px; flex-grow: 0; }
-/* 时间这一行（以及选服药时间时）：展开的那颗占满整行，其他的先让开 */
-.md-row .mchip { transition-property: max-width, flex-grow, border-radius, background-color, box-shadow, color, opacity, margin; }
-.tm-row.has-open .mchip:not(.open), .md-row.solo .mchip:not(.open) { max-width: 0; opacity: 0; margin-left: -6px; }
-.tm-row.has-open .mchip:first-child:not(.open), .md-row.solo .mchip:first-child:not(.open) { margin-left: 0; margin-right: -6px; }
-.mchip.open { flex-grow: 1; max-width: 380px; border-radius: 20px; }
-.mc-top { display: flex; align-items: center; }
-.mc-name { flex: 1; min-width: 0; min-height: 32px; padding: 0 9px; font-size: 13.5px; text-align: center; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mchip.sel .mc-name { font-weight: 600; }
-.mchip.open .mc-name { text-align: left; }
-.tchip .mc-name { display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.tchip.open .mc-name { justify-content: flex-start; }
-.tchip .mc-name .ic { color: var(--accent-text); flex: none; }
-.tchip .mc-name span { overflow: hidden; text-overflow: ellipsis; }
-.mc-x { display: grid; place-items: center; flex: none; width: 0; height: 32px; opacity: 0; color: inherit; overflow: hidden; transition: width .45s var(--island), opacity .25s var(--ease); }
-.mchip.open .mc-x { width: 30px; opacity: .75; }
-.mc-more, .mc-tp { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .5s var(--island), opacity .25s var(--ease); }
-.mc-more > div, .mc-tp > div { overflow: hidden; min-height: 0; }
-.mchip.open .mc-more, .mc-tp.open { grid-template-rows: 1fr; opacity: 1; transition-delay: 0s, .08s; }
-.mc-inner { display: flex; align-items: center; gap: 6px; padding: 0 6px 6px; }
-.mc-time { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 28px; padding: 0 9px; border-radius: 14px; background: var(--card); color: var(--ink); font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.mc-eff { display: flex; flex: 1; min-width: 0; padding: 2px; border-radius: 14px; background: var(--card); }
-.mc-eff button { flex: 1; height: 24px; border-radius: 12px; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; transition: background-color .25s var(--ease), color .25s var(--ease); }
+.isl[hidden] { display: none; }
+.isl-in { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+.isl-head { display: flex; align-items: center; gap: 8px; min-height: 38px; padding-left: 8px; }
+.isl-head b { flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
+.isl-sub { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.isl-ok { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; transition: transform .18s var(--ease); }
+.isl-ok:active { transform: scale(.92); }
+.isl-del { flex: none; height: 32px; padding: 0 12px; border-radius: 16px; font-size: 13px; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--fill-2); }
+/* 滚轮：上下滑，停下时自动对齐，中间一条是选中的值 */
+.wheels { position: relative; display: flex; justify-content: center; gap: 6px; height: 200px; border-radius: 20px; background: var(--fill); overflow: hidden; }
+.wheels::before, .wheels::after { content: ""; position: absolute; z-index: 2; left: 0; right: 0; height: 64px; pointer-events: none; }
+.wheels::before { top: 0; background: linear-gradient(var(--fill), transparent); }
+.wheels::after { bottom: 0; background: linear-gradient(transparent, var(--fill)); }
+.wh-band { position: absolute; top: 80px; left: 10px; right: 10px; height: 40px; border-radius: 14px; background: var(--card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 38%, transparent); pointer-events: none; }
+.wheel {
+  position: relative; z-index: 1; flex: 0 0 108px; height: 200px; overflow-y: scroll; overscroll-behavior: contain;
+  scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.wheel::-webkit-scrollbar { display: none; }
+.wheel.wide { flex: 1 1 auto; }
+.wh-pad { height: 80px; }
+.wh-i {
+  display: block; width: 100%; height: 40px; line-height: 40px; text-align: center; scroll-snap-align: center;
+  font-family: var(--num); font-size: 23px; font-variant-numeric: tabular-nums; color: var(--ink-3); transition: color .15s var(--ease);
+}
+.wheel.wide .wh-i { font-size: 18px; font-family: inherit; }
+.wh-i.on { color: var(--accent-text); font-weight: 700; }
+.wh-colon { position: relative; z-index: 1; align-self: center; margin-top: -3px; font-family: var(--num); font-size: 23px; font-weight: 700; color: var(--accent-text); }
+.isl-foot { display: flex; align-items: center; gap: 6px; }
+.isl-foot .chip { flex: 1 1 auto; min-height: 36px; padding: 0 6px; font-size: 13.5px; }
+.isl-l { flex: none; padding: 0 4px 0 8px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); }
+.mc-eff { display: flex; flex: 1; min-width: 0; padding: 3px; border-radius: 19px; background: var(--fill); }
+.mc-eff button { flex: 1; height: 32px; border-radius: 16px; font-size: 14px; color: var(--ink-2); white-space: nowrap; transition: background-color .25s var(--ease), color .25s var(--ease); }
 .mc-eff button.on { background: var(--accent); color: #fff; font-weight: 600; }
-/* 胶囊里的内容：快捷项、预设，和我们自己的时间条（小时左右滑 + 四个分钟） */
-.tp { display: flex; flex-direction: column; gap: 6px; padding: 0 6px 6px; }
-.tp .chips { gap: 5px; }
-.today .tp .chip.mini { min-height: 28px; padding: 0 8px; font-size: 12.5px; border-radius: 14px; background: var(--card); color: var(--ink-2); box-shadow: none; flex: 1 1 auto; }
-.today .tp .chip.mini.on { background: var(--accent); color: #fff; }
-.tp-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.mc-tp .tp-line { padding: 0 6px 6px; }
-.tp-hours {
-  position: relative; flex: 1; min-width: 0; display: flex; gap: 2px; padding: 2px; border-radius: 14px; background: var(--card);
-  overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
-}
-.tp-hours::-webkit-scrollbar { display: none; }
-.tp-hours button { flex: none; width: 30px; height: 24px; border-radius: 12px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; scroll-snap-align: center; transition: background-color .25s var(--ease), color .25s var(--ease); }
-.tp-hours button.on { background: var(--accent); color: #fff; font-weight: 600; }
-.tp-hours button:disabled { opacity: .28; }
-.tp-min { flex: none; }
-.tp-min button { flex: none; padding: 0 5px; font-variant-numeric: tabular-nums; }
