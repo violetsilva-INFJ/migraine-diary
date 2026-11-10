@@ -616,9 +616,9 @@ function viewHome() {
   const name = (state.settings.name || '').trim();
   const streak = streakDays();
   return `
-  <div class="home-sky"><div class="sky-art" aria-hidden="true"></div>
-    <header class="top"><h1>${greet}${name ? '，' + esc(name) : ''}</h1>
-      <div class="home-meta"><span>${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}</span>${streak >= 2 ? `<span class="home-streak">${icon('sun', 13, 2)}连续 ${streak} 天</span>` : ''}</div></header></div>
+  <div class="home-sky"><div class="sky-clip" aria-hidden="true"><div class="sky-art"></div></div>
+    <header class="top"><div><h1>${greet}${name ? '，' + esc(name) : ''}</h1>
+      <div class="home-meta"><span>${now.getMonth() + 1}月${now.getDate()}日 星期${WEEK[now.getDay()]}</span>${streak >= 2 ? `<span class="home-streak">${icon('sun', 13, 2)}连续 ${streak} 天</span>` : ''}</div></div></header></div>
   ${installBanner()}
   ${todayCards()}`;
 }
@@ -1110,7 +1110,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.12</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.13</div></div></div>
   </div>`;
 }
 
