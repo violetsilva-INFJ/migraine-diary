@@ -150,6 +150,9 @@ function render() {
   else popLast($app);
   if (ui.tab === 'me') updatePersistInfo();
   document.documentElement.dataset.tab = ui.tab;
+  // 系统自己画状态栏的那些 iOS 版本，状态栏取页面底色：首页让它和画的天顶同色，其他页面用页面底色
+  const tc = ui.tab === 'home' ? ['#9A96D9', '#4A4772'] : ['#F5F2EC', '#0F1016'];
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m, i) => { m.content = tc[i]; });
 }
 
 // 轻点反馈：重新渲染后，给刚点过的那个元素加一个弹跳动画
@@ -354,8 +357,11 @@ function islandHTML(t, k) {
   if (k === '@dur') return `<div class="isl-in">${head('持续时间', '疼了多久')}
     <div class="wheels"><div class="wh-band"></div>${wheel('d', DUR_WHEEL.map(x => x[1]), Math.max(0, DUR_WHEEL.findIndex(x => x[0] === t.a.duration)), 'wide')}</div></div>`;
   const m = t.a.meds.find(x => x.name === k), n = esc(k);
-  return `<div class="isl-in">${head(n, '几点吃的', `<button class="isl-del" data-act="t-med-del" data-v="${n}">不记</button>`)}${timeWheels(m?.time)}
-    <div class="isl-foot"><span class="isl-l">管用吗</span><div class="mc-eff">${EFFECT_SHORT.map((l, v) => `<button class="${m?.effect === v ? 'on' : ''}" data-act="t-eff" data-m="${n}" data-v="${v}" aria-label="${EFFECTS[v].label}">${l}</button>`).join('')}</div></div></div>`;
+  // 时间是选填的：默认「不记时间」，滚一下滚轮才算记了几点
+  return `<div class="isl-in">${head(n, '已记上', `<button class="isl-del" data-act="t-med-del" data-v="${n}">移除</button>`)}
+    <div class="isl-foot"><span class="isl-l">管用吗</span><div class="mc-eff">${EFFECT_SHORT.map((l, v) => `<button class="${m?.effect === v ? 'on' : ''}" data-act="t-eff" data-m="${n}" data-v="${v}" aria-label="${EFFECTS[v].label}">${l}</button>`).join('')}</div></div>
+    <div class="isl-foot"><span class="isl-l">几点吃的</span><span class="isl-hint">滚一下就记上</span><button class="chip mini isl-nt ${m?.time ? '' : 'on'}" data-act="t-med-notime" data-v="${n}" aria-pressed="${!m?.time}">不记时间</button></div>
+    ${timeWheels(m?.time).replace('class="wheels"', `class="wheels ${m?.time ? '' : 'off'}"`)}</div>`;
 }
 const $isl = document.createElement('div');
 $isl.className = 'isl';
@@ -364,7 +370,7 @@ document.body.appendChild($isl);
 const SPRING = CSS.supports?.('transition-timing-function', 'linear(0, 1)')
   ? 'linear(0, .2 5%, .55 12%, .84 20%, 1.01 28%, 1.07 35%, 1.075 41%, 1.05 50%, 1.015 62%, .997 76%, 1)' : 'cubic-bezier(.3, 1.3, .5, 1)';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let islAnims = [], islandSkip = null, wheelTimer = 0;
+let islAnims = [], islandSkip = null, wheelTimer = 0, wheelTouched = false;
 const openerOf = k => [...$app.querySelectorAll('[data-isl]')].find(el => el.dataset.isl === k);
 const morph = (from, to) => `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
 
@@ -373,6 +379,7 @@ function openIsland(k, opener) {
   islAnims.forEach(a => a.cancel());
   islAnims = [];
   clearTimeout(wheelTimer);
+  wheelTouched = false;
   ui.island = k;
   $isl.innerHTML = islandHTML(t, k);
   $isl.hidden = false;
@@ -420,6 +427,8 @@ function commitWheels() {
     if (t.a.duration !== v) editToday(({ a }) => { a.duration = v; });
     return;
   }
+  // 药的时间是选填的：没碰过滚轮、也没记过时间，就保持「不记时间」
+  if (k !== '@start' && !timeOf(t, k) && !wheelTouched) return;
   const time = `${pad2(val('h'))}:${pad2(val('m'))}`;
   if (timeOf(t, k) !== time) editToday(x => setTimeOf(x, k, time));
 }
@@ -428,13 +437,22 @@ function syncIsland() {
   if (!k || k === '@dur' || $isl.hidden) return;
   const m = k === '@start' ? null : t.a.meds.find(x => x.name === k);
   if (k !== '@start' && !m) return;
-  if (m) $isl.querySelectorAll('.mc-eff button').forEach(b => b.classList.toggle('on', m.effect === +b.dataset.v));
+  if (m) {
+    $isl.querySelectorAll('.mc-eff button').forEach(b => b.classList.toggle('on', m.effect === +b.dataset.v));
+    $isl.querySelector('.wheels').classList.toggle('off', !m.time);
+    const nt = $isl.querySelector('.isl-nt');
+    nt.classList.toggle('on', !m.time);
+    nt.setAttribute('aria-pressed', !m.time);
+    if (!m.time) return;
+  }
   const [h, mi] = timeOf(t, k).split(':').map(Number);
   [['h', h], ['m', mi]].forEach(([n, i]) => {
     const w = $isl.querySelector(`[data-wheel="${n}"]`);
     if (w && +w.dataset.i !== i) w.scrollTo({ top: i * ITEM_H, behavior: 'smooth' });
   });
 }
+// 手指（或鼠标滚轮）碰过滚轮，才算用户在选时间；打开面板时程序自己把滚轮摆到位不算
+['pointerdown', 'touchstart', 'wheel'].forEach(ev => $isl.addEventListener(ev, e => { if (e.target.closest?.('.wheel')) wheelTouched = true; }, { capture: true, passive: true }));
 $isl.addEventListener('scroll', e => {
   const w = e.target;
   if (!w.classList?.contains('wheel')) return;
@@ -471,8 +489,8 @@ function todayCards() {
     return `<button class="chip mini mchip ${m ? 'on' : ''}" data-act="t-med" data-isl="${n}" data-v="${n}" data-dose="${esc(p.dose)}" aria-pressed="${!!m}"><span class="mc-n">${n}</span><i class="mc-t">${esc(m?.time || '')}</i></button>`;
   };
   const done = !t.dirty && t.saved;
-  return `<section class="card today ${t.vas > 0 ? 'has-pain' : ''}">
-    ${row('疼痛', `<div class="vas-wrap"><input class="range" type="range" min="0" max="10" step="1" value="${t.vas}" data-input="t-vas" aria-label="疼痛程度，0 是没有头痛，10 是能想象的最痛">
+  return `<section class="card today ${t.vas > 0 ? 'has-pain' : ''}"><div class="today-bg"></div>
+    ${row('疼痛', `<div class="vas-wrap"><input class="range" type="range" min="0" max="10" step="any" data-snap="1" data-sv="${t.vas}" value="${t.vas}" data-input="t-vas" aria-label="疼痛程度，0 是没有头痛，10 是能想象的最痛">
       <div class="vas-ends" aria-hidden="true"><span>0 不痛</span><span>10 最痛</span></div></div><span class="t-vas" id="t-vas">${vasLabel(t.vas)}</span>`, 'r-vas')}
     <div class="pain-rows"><div>
       ${row('时间', startChip + durChip)}
@@ -480,10 +498,10 @@ function todayCards() {
       ${row('性质', QUICK_Q.map(([k, l]) => chip('t-q', k, l, k)).join(''))}
       ${row('伴随', QUICK_SYM.map(([k, l]) => chip('t-sym', k, l, k)).join(''))}
       ${row('用药', presets.length ? `<div class="meds-row">${presets.map(medChip).join('')}</div>` : '<span class="t-note">在「我的」里添加常用药</span>')}
-      ${row('耽误', IMPACT_SHORT.map((l, i) => chip('t-impact', i, l, `耽误上班、带孩子：${IMPACT[i]}`)).join('') + `<button class="t-more" data-act="t-detail" aria-label="部位图、诱因、备注">详细${icon('chevR', 14)}</button>`)}
+      ${row('耽误', IMPACT_SHORT.map((l, i) => chip('t-impact', i, l, `耽误上班、带孩子：${IMPACT[i]}`)).join(''))}
     </div></div>
     <div class="t-div"><span>诱因</span></div>
-    ${row('睡眠', `<input class="range sleep-range ${t.sleep == null ? 'unset' : ''}" type="range" min="3" max="12" step="0.5" value="${t.sleep ?? 7}" data-input="t-sleep-r" aria-label="昨晚睡了几个小时"><span class="t-vas t-sleep" id="t-sleep">${sleepLabel(t.sleep)}</span>`, 'r-vas r-sleep')}
+    ${row('睡眠', `<input class="range sleep-range ${t.sleep == null ? 'unset' : ''}" type="range" min="3" max="12" step="any" data-snap="0.5" value="${t.sleep ?? 7}" data-input="t-sleep-r" aria-label="昨晚睡了几个小时"><span class="t-vas t-sleep" id="t-sleep">${sleepLabel(t.sleep)}</span>`, 'r-vas r-sleep')}
     ${row('喝了', DRINKS.map(([l]) => chip('t-drink', l, l)).join('') + chip('t-drink', 'none', '没喝'))}
     <div class="tgl-row">
       <button class="tgl ${t.period ? 'on' : ''}" data-act="t-period" aria-pressed="${t.period}"><span class="gl" style="--c:var(--t-period)">${icon('drop', 17, 2)}</span><span class="tgl-t"><b>月经</b><i>${periodText(t)}</i></span></button>
@@ -493,11 +511,45 @@ function todayCards() {
   </section>`;
 }
 
+// 疼痛从 0 变成有值（或反过来）时，整张面板要重新排一次。排版只做一次（不逐帧挤压），
+// 然后每一行、面板的底、顶上的画各自用 transform 从原来的位置滑到新位置，全程不再重新排版
+const FLIP_EASE = 'cubic-bezier(.32, .72, 0, 1)';
+function flipPain(root, want) {
+  if (reduceMotion.matches) { root.classList.toggle('has-pain', want); return; }
+  const view = root.closest('.view'), bg = root.querySelector('.today-bg'), sky = view.querySelector('.sky-art'), pr = root.querySelector('.pain-rows');
+  const rows = [...root.children].filter(el => el !== bg && el !== pr);
+  const rect = el => el.getBoundingClientRect();
+  const r0 = rows.map(rect), bg0 = rect(bg), sky0 = sky && rect(sky), pr0 = rect(pr), card0 = rect(root);
+  root.classList.toggle('has-pain', want);
+  const opt = { duration: 460, easing: FLIP_EASE };
+  rows.forEach((el, i) => {
+    const b = rect(el), dy = (r0[i].top + r0[i].height / 2) - (b.top + b.height / 2);
+    if (Math.abs(dy) > .5) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], opt);
+  });
+  const bg1 = rect(bg);
+  bg.animate([{ transform: `translateY(${bg0.bottom - bg1.bottom}px) scaleY(${bg0.height / bg1.height})` }, { transform: 'none' }], opt);
+  if (sky) sky.animate([{ transform: `translateY(${sky0.bottom - rect(sky).bottom}px)` }, { transform: 'none' }], opt);
+  if (want) {
+    // 新出现的几行：从上面一点的位置淡入，一行跟着一行
+    pr.querySelectorAll('.trow').forEach((el, i) => el.animate([{ opacity: 0, transform: 'translateY(-18px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 380, delay: 30 + i * 22, easing: FLIP_EASE, fill: 'backwards' }));
+  } else {
+    // 要收起的几行：留在原地淡出（不占位置），下面的行同时滑上来
+    const card1 = rect(root);
+    Object.assign(pr.style, { position: 'absolute', left: `${pr0.left - card1.left}px`, top: `${pr0.top - card0.top}px`, width: `${pr0.width}px`, height: `${pr0.height}px`, gridTemplateRows: '1fr', opacity: 1, pointerEvents: 'none' });
+    const out = pr.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-10px)' }], { duration: 180, easing: 'ease-out', fill: 'forwards' });
+    const clear = () => { pr.removeAttribute('style'); out.cancel(); };
+    out.onfinish = clear;
+    pr._clear = clear;
+  }
+  if (want && pr._clear) { pr._clear(); pr._clear = null; }
+}
+
 // 原地同步：只改 class 和文字，让 CSS 过渡自己完成动画
 function syncToday() {
   const t = ui.today, a = t.a, root = $app.querySelector('.today');
   if (!root) return;
-  root.classList.toggle('has-pain', t.vas > 0);
+  if (root.classList.contains('has-pain') !== t.vas > 0) flipPain(root, t.vas > 0);
   root.querySelectorAll('[data-act]').forEach(el => {
     const on = todayOn(t, el);
     if (on == null) return;
@@ -1055,7 +1107,7 @@ function viewMe() {
   <div class="group">
     <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('shield', 18, 2)}</span><div class="grow"><div class="t">数据存储</div><div class="s" id="persist-info">${state.attacks.length} 次头痛 · ${Object.keys(state.days).length} 天打卡，保存在本机，不会上传</div></div></div>
     ${row('method', 'sparkle', 'var(--t-sleep)', '分析方法说明')}
-    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.10</div></div></div>
+    <div class="row"><span class="li-ic gl" style="--c:var(--ink-3)">${icon('info', 18, 2)}</span><div class="grow"><div class="t">仅用于记录和自我观察</div><div class="s">不能替代医生的诊断和治疗建议 · 偏晴 · 偏头痛日记 v1.11</div></div></div>
   </div>`;
 }
 
@@ -1154,7 +1206,7 @@ function vasWidget(v) {
   return `<div class="vas ${set ? '' : 'unset'}" id="vas" style="--vas-c:var(--sev${sevOfVas(v || 0) || 1})">
     <div class="vas-head"><span class="vas-num" data-v="${set ? v : 0}">${set ? v : '–'}<small>/10</small></span><span class="vas-word">${set ? vasWord(v) : ''}</span>
       <span class="vas-hint">${set ? SEVERITY[sevOfVas(v)].hint : '拖动滑块选择'}</span></div>
-    <input class="range" type="range" min="0" max="10" step="1" value="${set ? v : 0}" data-input="a-vas" aria-label="疼痛强度，0 到 10 分" aria-valuetext="${set ? `${v} 分，${vasWord(v)}` : '未选择'}">
+    <input class="range" type="range" min="0" max="10" step="any" data-snap="1" value="${set ? v : 0}" data-input="a-vas" aria-label="疼痛强度，0 到 10 分" aria-valuetext="${set ? `${v} 分，${vasWord(v)}` : '未选择'}">
     <div class="vas-scale">${[0, 2, 4, 6, 8, 10].map(n => `<span>${n}</span>`).join('')}</div>
     <div class="vas-anchors"><span>不痛</span><span>能想象的最痛</span></div>
   </div>`;
@@ -1347,7 +1399,7 @@ function moodEditor(date) {
   };
   return `<section class="card mood-card">
       <div class="mood-top" id="mood-top">${moodFace(v)}<div class="mood-word">${v ? MOOD[v - 1] : '此刻感觉怎么样？'}</div></div>
-      <input class="range mood-range" type="range" min="1" max="7" step="1" value="${v || 4}" data-input="c-valence" aria-label="心情，从非常不愉快到非常愉快" aria-valuetext="${v ? MOOD[v - 1] : '未选择'}">
+      <input class="range mood-range" type="range" min="1" max="7" step="any" data-snap="1" value="${v || 4}" data-input="c-valence" aria-label="心情，从非常不愉快到非常愉快" aria-valuetext="${v ? MOOD[v - 1] : '未选择'}">
       <div class="vas-anchors"><span>非常不愉快</span><span>非常愉快</span></div>
     </section>
     <section class="card"><h4>哪些词最能形容你的感受<small>可多选</small></h4><div class="chips">${feelings.map(f => chip('c-feel', m.feelings || [], f)).join('')}</div></section>
@@ -1623,7 +1675,7 @@ const ACTIONS = {
   // 弹出 / 收起滚轮面板（不算改动）
   't-island': el => { const k = el.dataset.v; if (islandSkip === k) { islandSkip = null; return; } openIsland(k, el); },
   'isl-close': () => closeIsland(),
-  'isl-pick': el => el.parentElement.scrollTo({ top: +el.dataset.i * ITEM_H, behavior: 'smooth' }),
+  'isl-pick': el => { wheelTouched = true; el.parentElement.scrollTo({ top: +el.dataset.i * ITEM_H, behavior: 'smooth' }); },
   't-ago': el => {
     editToday(t => {
       const d = new Date(Date.now() - +el.dataset.v * 60000);
@@ -1635,8 +1687,15 @@ const ACTIONS = {
   't-med': el => {
     const t = todayState(), n = el.dataset.v;
     if (islandSkip === n) { islandSkip = null; return; }
-    if (!t.a.meds.some(m => m.name === n)) editToday(x => x.a.meds.push({ id: uid(), name: n, dose: el.dataset.dose || '', time: hhmm(new Date()), effect: null, relief: null }));
+    if (!t.a.meds.some(m => m.name === n)) editToday(x => x.a.meds.push({ id: uid(), name: n, dose: el.dataset.dose || '', time: '', effect: null, relief: null }));
     openIsland(n, el);
+  },
+  // 「不记时间」：点一下清掉时间；再点一下按滚轮现在停的位置记上
+  't-med-notime': el => {
+    const n = el.dataset.v, has = !!timeOf(ui.today, n);
+    wheelTouched = !has;
+    if (has) editToday(t => { const m = t.a.meds.find(x => x.name === n); if (m) m.time = ''; });
+    else commitWheels();
   },
   't-med-del': el => { const n = el.dataset.v; closeIsland(); editToday(t => { t.a.meds = t.a.meds.filter(m => m.name !== n); }); },
   't-eff': el => editToday(t => {
@@ -1868,14 +1927,14 @@ function addLog(kind, cat, item) {
 
 const INPUTS = {
   't-vas': el => {
-    const t = todayState(), v = +el.value;
+    const t = todayState(), v = snapVal(el);
     t.vas = v; t.a.vas = v || null;
     $app.querySelector('#t-vas').innerHTML = vasLabel(v);
     keepDraft(); syncToday();
   },
   't-sleep-r': el => {
     const t = todayState();
-    t.sleep = +el.value;
+    t.sleep = snapVal(el);
     el.classList.remove('unset');
     $app.querySelector('#t-sleep').innerHTML = sleepLabel(t.sleep);
     keepDraft(); syncToday();
@@ -1886,7 +1945,7 @@ const INPUTS = {
     INPUTS.ln = setTimeout(() => patchDay(ui.sheet.date, d => { const e = (d[f] || []).find(x => x.id === id); if (e) e.note = v; }), 300);
   },
   'c-valence': el => {
-    const v = +el.value;
+    const v = snapVal(el);
     patchDay(ui.sheet.date, d => { d.mood = { feelings: [], factors: [], ...(d.mood || {}), valence: v }; });
     updateMoodTop(v);
   },
@@ -1902,7 +1961,7 @@ const INPUTS = {
   },
   'a-note': el => { draft().note = el.value; ui.sheet.dirty = true; },
   'a-med-time': el => { draft().meds[+el.dataset.i].time = el.value; ui.sheet.dirty = true; },
-  'a-vas': el => { const v = +el.value; draft().vas = v > 0 ? v : null; ui.sheet.dirty = true; updateVasWidget(v); },
+  'a-vas': el => { const v = snapVal(el); draft().vas = v > 0 ? v : null; ui.sheet.dirty = true; updateVasWidget(v); },
   name: el => { state.settings.name = el.value; clearTimeout(INPUTS.t); INPUTS.t = setTimeout(saveSettings, 400); },
 };
 
@@ -1930,11 +1989,34 @@ document.addEventListener('click', e => {
     fn(el, e);
   }
 });
+// 滑块不分格，拇指一直跟着手指走；值按最近的一格算（格子变了才通知），松手后拇指滑到那一格上
+const snapVal = el => { const k = +el.dataset.snap || 1; return Math.round(+el.value / k) * k; };
+let settleRaf = 0;
+function settleRange(el) {
+  const from = +el.value, to = snapVal(el);
+  cancelAnimationFrame(settleRaf);
+  if (Math.abs(to - from) < 1e-3 || reduceMotion.matches) { el.value = to; return; }
+  const t0 = performance.now();
+  const step = now => {
+    const p = Math.min(1, (now - t0) / 180);
+    el.value = from + (to - from) * (1 - (1 - p) ** 3);
+    if (p < 1 && el.isConnected) settleRaf = requestAnimationFrame(step);
+  };
+  settleRaf = requestAnimationFrame(step);
+}
 document.addEventListener('input', e => {
   const el = e.target.closest('[data-input]');
-  if (el) INPUTS[el.dataset.input]?.(el, e);
+  if (!el) return;
+  if (el.dataset.snap) {
+    cancelAnimationFrame(settleRaf);
+    const v = String(snapVal(el));
+    if (el.dataset.sv === v) return;
+    el.dataset.sv = v;
+  }
+  INPUTS[el.dataset.input]?.(el, e);
 });
 document.addEventListener('change', e => {
+  if (e.target.dataset?.snap) settleRange(e.target);
   if (e.target.id === 'import-file' && e.target.files[0]) { importJSON(e.target.files[0]); e.target.value = ''; }
 });
 document.addEventListener('keydown', e => {
