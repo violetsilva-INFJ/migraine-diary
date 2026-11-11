@@ -474,11 +474,19 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .head .side-tags text { font-size: 11px; fill: var(--ink-2); text-anchor: middle; font-weight: 600; font-family: var(--font); }
 
 /* ---------- 日期 / 时间选择 ---------- */
-.dt-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; }
-.dt-pill {
-  position: relative; display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 14px; border-radius: 16px;
-  background: var(--fill); font-size: 16.5px; font-weight: 600; cursor: pointer; transition: transform .2s var(--bounce);
+.dt-row { display: flex; }
+/* 时间按钮（和首页的时间胶囊一个样子）：点一下弹出滚轮面板 */
+.chip.dt-chip {
+  flex: 1; min-width: 0; min-height: 46px; padding: 0 16px; gap: 8px; justify-content: flex-start; border-radius: 23px;
+  background: var(--card); color: var(--ink); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; box-shadow: inset 0 0 0 1px var(--fill-2);
 }
+.dt-chip .ic { color: var(--accent-text); flex: none; }
+.dt-chip .dt-label { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.chip.mini.dt-chip.amed-t { flex: none; min-height: 34px; padding: 0 11px; gap: 5px; border-radius: 17px; font-size: 13.5px; margin-left: auto; }
+.amed-t .dt-label { flex: none; }
+.rec-when { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+.rec-when .rec-done { width: 46px; height: 46px; }
+.rec-has { margin-left: 8px; padding: 1px 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-text); font-size: 11.5px; font-weight: 600; vertical-align: 1px; }
 .dt-pill:active { transform: scale(.97); }
 .dt-pill .ic { color: var(--accent-text); }
 .dt-pill span { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -896,7 +904,7 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 
 /* 「灵动岛」：从点到的那一颗里弹出来，盖在选项上面；展开和收起只用 transform / opacity（脚本里做），不重新排版 */
 .isl {
-  position: fixed; z-index: 45; left: 0; top: 0; transform-origin: 0 0; border-radius: 28px; overflow: hidden; will-change: transform, opacity;
+  position: fixed; z-index: 70; left: 0; top: 0; transform-origin: 0 0; border-radius: 28px; overflow: hidden; will-change: transform, opacity;
   background: var(--card); box-shadow: 0 0 0 1.5px var(--accent), 0 22px 48px -14px rgba(40, 36, 90, .42);
 }
 .isl[hidden] { display: none; }
@@ -920,6 +928,13 @@ textarea.field { min-height: 92px; resize: vertical; line-height: 1.6; }
 .wheel::-webkit-scrollbar { display: none; }
 .wheel.wide { flex: 1 1 auto; }
 .wheels.w3 .wheel { flex-basis: 76px; }
+.wheels.w5 { gap: 2px; }
+.wheels.w5 .wheel { flex-basis: 44px; }
+.wheels.w5 .wheel[data-wheel="y"] { flex-basis: 72px; }
+.wheels.w5 .wheel[data-wheel="mo"], .wheels.w5 .wheel[data-wheel="dd"] { flex-basis: 54px; }
+.wheels.w5 .wheel.wgap { margin-left: 8px; }
+.wheels.w5 .wh-i { font-size: 20px; }
+.wheels.w5 .wheel[data-wheel="y"] .wh-i, .wheels.w5 .wheel[data-wheel="mo"] .wh-i, .wheels.w5 .wheel[data-wheel="dd"] .wh-i { font-size: 16.5px; font-family: inherit; }
 .wheels.w3 .wheel.wday { flex-basis: 86px; }
 .wheel.wday .wh-i { font-size: 18px; font-family: inherit; }
 .wh-pad { height: 80px; }
